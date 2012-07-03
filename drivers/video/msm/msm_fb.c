@@ -1000,6 +1000,10 @@ static int msm_fb_blank_sub(int blank_mode, struct fb_info *info,
 				del_timer(&mfd->msmfb_no_update_notify_timer);
 			complete(&mfd->msmfb_no_update_notify);
 
+			/* clean fb to prevent displaying old fb */
+			memset((void *)info->screen_base, 0,
+					info->fix.smem_len);
+
 			msleep(16);
 			ret = pdata->off(mfd->pdev);
 			if (ret)
