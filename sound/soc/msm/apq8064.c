@@ -2093,6 +2093,7 @@ static int __init msm_audio_init(void)
 
 	mutex_init(&cdc_mclk_mutex);
 	atomic_set(&auxpcm_rsc_ref, 0);
+
 	return ret;
 
 }
