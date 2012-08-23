@@ -2544,6 +2544,7 @@ static struct platform_device *common_devices[] __initdata = {
 	&msm_gss,
 	&apq8064_rtb_device,
 	&apq8064_cpu_idle_device,
+	&apq8064_msm_gov_device,
 	&apq8064_device_cache_erp,
 	&msm8960_device_ebi1_ch0_erp,
 	&msm8960_device_ebi1_ch1_erp,
@@ -2567,6 +2568,7 @@ static struct platform_device *common_devices[] __initdata = {
 #ifdef CONFIG_BATTERY_BCL
 	&battery_bcl_device,
 #endif
+	&apq8064_msm_mpd_device,
 };
 
 static struct platform_device *cdp_devices[] __initdata = {
