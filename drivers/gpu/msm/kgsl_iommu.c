@@ -1239,7 +1239,8 @@ static void kgsl_iommu_default_setstate(struct kgsl_mmu *mmu,
 	msm_iommu_lock();
 
 	if (flags & KGSL_MMUFLAGS_PTUPDATE) {
-		kgsl_idle(mmu->device);
+		if (!msm_soc_version_supports_iommu_v1())
+			kgsl_idle(mmu->device);
 		for (i = 0; i < iommu->unit_count; i++) {
 			/* get the lsb value which should not change when
 			 * changing ttbr0 */
