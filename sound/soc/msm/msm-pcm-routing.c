@@ -968,7 +968,8 @@ static int msm_routing_set_multimedia2_vol_mixer(struct snd_kcontrol *kcontrol,
 				struct snd_ctl_elem_value *ucontrol)
 {
 
-	if (!multi_ch_pcm_set_volume(ucontrol->value.integer.value[0]))
+	if (!multi_ch_pcm_set_volume(ucontrol->value.integer.value[0],
+		MSM_FRONTEND_DAI_MULTIMEDIA2))
 		msm_route_multimedia2_vol_control =
 			ucontrol->value.integer.value[0];
 
@@ -987,7 +988,8 @@ static int msm_routing_set_multimedia5_vol_mixer(struct snd_kcontrol *kcontrol,
 				struct snd_ctl_elem_value *ucontrol)
 {
 
-	if (!multi_ch_pcm_set_volume(ucontrol->value.integer.value[0]))
+	if (!multi_ch_pcm_set_volume(ucontrol->value.integer.value[0],
+		MSM_FRONTEND_DAI_MULTIMEDIA5))
 		msm_route_multimedia5_vol_control =
 			ucontrol->value.integer.value[0];
 
@@ -1004,7 +1006,8 @@ static int msm_routing_get_multimedia3_vol_mixer(struct snd_kcontrol *kcontrol,
 static int msm_routing_set_multimedia3_vol_mixer(struct snd_kcontrol *kcontrol,
 				struct snd_ctl_elem_value *ucontrol)
 {
-	if (!multi_ch_pcm_set_volume(ucontrol->value.integer.value[0]))
+	if (!multi_ch_pcm_set_volume(ucontrol->value.integer.value[0],
+		MSM_FRONTEND_DAI_MULTIMEDIA3))
 		msm_route_multimedia3_vol_control =
 			ucontrol->value.integer.value[0];
 
@@ -1022,7 +1025,8 @@ static int msm_routing_get_compressed_vol_mixer(struct snd_kcontrol *kcontrol,
 static int msm_routing_set_compressed_vol_mixer(struct snd_kcontrol *kcontrol,
 				struct snd_ctl_elem_value *ucontrol)
 {
-	if (!compressed_set_volume(ucontrol->value.integer.value[0]))
+	if (!compressed_set_volume(ucontrol->value.integer.value[0],
+		MSM_FRONTEND_DAI_MULTIMEDIA4))
 		msm_route_compressed_vol_control =
 			ucontrol->value.integer.value[0];
 
@@ -1039,7 +1043,8 @@ static int msm_routing_get_compressed2_vol_mixer(struct snd_kcontrol *kcontrol,
 static int msm_routing_set_compressed2_vol_mixer(struct snd_kcontrol *kcontrol,
 				struct snd_ctl_elem_value *ucontrol)
 {
-	if (!compressed_set_volume(ucontrol->value.integer.value[0]))
+	if (!compressed_set_volume(ucontrol->value.integer.value[0],
+		MSM_FRONTEND_DAI_MULTIMEDIA7))
 		msm_route_compressed2_vol_control =
 			ucontrol->value.integer.value[0];
 	return 0;
@@ -1055,7 +1060,8 @@ static int msm_routing_get_compressed3_vol_mixer(struct snd_kcontrol *kcontrol,
 static int msm_routing_set_compressed3_vol_mixer(struct snd_kcontrol *kcontrol,
 				struct snd_ctl_elem_value *ucontrol)
 {
-	if (!compressed_set_volume(ucontrol->value.integer.value[0]))
+	if (!compressed_set_volume(ucontrol->value.integer.value[0],
+		MSM_FRONTEND_DAI_MULTIMEDIA8))
 		msm_route_compressed3_vol_control =
 			ucontrol->value.integer.value[0];
 	return 0;
