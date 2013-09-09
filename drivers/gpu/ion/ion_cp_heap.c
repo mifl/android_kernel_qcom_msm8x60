@@ -707,18 +707,21 @@ int ion_cp_cache_ops(struct ion_heap *heap, struct ion_buffer *buffer,
 				ptr = ioremap(buff_phys, size_to_vmap);
 				if (ptr) {
 					switch (cmd) {
+					case ION_IOC_CLEAN_CACHES_COMPAT:
 					case ION_IOC_CLEAN_CACHES:
 						dmac_clean_range(ptr,
 							ptr + size_to_vmap);
 						outer_cache_op =
 							outer_clean_range;
 						break;
+					case ION_IOC_INV_CACHES_COMPAT:
 					case ION_IOC_INV_CACHES:
 						dmac_inv_range(ptr,
 							ptr + size_to_vmap);
 						outer_cache_op =
 							outer_inv_range;
 						break;
+					case ION_IOC_CLEAN_INV_CACHES_COMPAT:
 					case ION_IOC_CLEAN_INV_CACHES:
 						dmac_flush_range(ptr,
 							ptr + size_to_vmap);
@@ -742,14 +745,17 @@ int ion_cp_cache_ops(struct ion_heap *heap, struct ion_buffer *buffer,
 		}
 	} else {
 		switch (cmd) {
+		case ION_IOC_CLEAN_CACHES_COMPAT:
 		case ION_IOC_CLEAN_CACHES:
 			dmac_clean_range(vaddr, vaddr + length);
 			outer_cache_op = outer_clean_range;
 			break;
+		case ION_IOC_INV_CACHES_COMPAT:
 		case ION_IOC_INV_CACHES:
 			dmac_inv_range(vaddr, vaddr + length);
 			outer_cache_op = outer_inv_range;
 			break;
+		case ION_IOC_CLEAN_INV_CACHES_COMPAT:
 		case ION_IOC_CLEAN_INV_CACHES:
 			dmac_flush_range(vaddr, vaddr + length);
 			outer_cache_op = outer_flush_range;
