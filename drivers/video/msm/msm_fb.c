@@ -61,12 +61,11 @@ static unsigned char *fbram;
 static unsigned char *fbram_phys;
 static int fbram_size;
 static boolean bf_supported;
-/* Set backlight on resume after 50 ms after first
+/* Set backlight on resume after 20 ms after first
  * pan display on the panel. This is to avoid panel specific
  * transients during resume.
  */
-unsigned long backlight_duration = (HZ/20);
-
+unsigned long backlight_duration = (HZ/50);
 static struct platform_device *pdev_list[MSM_FB_MAX_DEV_LIST];
 static int pdev_list_cnt;
 
@@ -944,17 +943,6 @@ static int msm_fb_blank_sub(int blank_mode, struct fb_info *info,
 			ret = pdata->on(mfd->pdev);
 			if (ret == 0) {
 				mfd->panel_power_on = TRUE;
-
-/* ToDo: possible conflict with android which doesn't expect sw refresher */
-/*
-	  if (!mfd->hw_refresh)
-	  {
-	    if ((ret = msm_fb_resume_sw_refresher(mfd)) != 0)
-	    {
-	      MSM_FB_INFO("msm_fb_blank_sub: msm_fb_resume_sw_refresher failed = %d!\n",ret);
-	    }
-	  }
-*/
 				mfd->panel_driver_on = mfd->op_enable;
 			}
 		}
@@ -972,17 +960,21 @@ static int msm_fb_blank_sub(int blank_mode, struct fb_info *info,
 			curr_pwr_state = mfd->panel_power_on;
 			mfd->panel_power_on = FALSE;
 			cancel_delayed_work_sync(&mfd->backlight_worker);
+			bl_updated = 0;
 
 			if (mfd->msmfb_no_update_notify_timer.function)
 				del_timer(&mfd->msmfb_no_update_notify_timer);
 			complete(&mfd->msmfb_no_update_notify);
 
-			bl_updated = 0;
-
 			msleep(16);
 			ret = pdata->off(mfd->pdev);
 			if (ret)
 				mfd->panel_power_on = curr_pwr_state;
+
+			if (mfd->timeline) {
+				sw_sync_timeline_inc(mfd->timeline, 2);
+				mfd->timeline_value += 2;
+			}
 
 			mfd->op_enable = TRUE;
 		}
@@ -3720,8 +3712,7 @@ static int msmfb_display_commit(struct fb_info *info,
 	if ((!ret) && (buf_fence->rel_fen_fd[0] > 0))
 		copy_back = TRUE;
 
-	ret = msm_fb_pan_display_ex(&disp_commit.var,
-			      info, disp_commit.wait_for_finish);
+	ret = msm_fb_pan_display_ex(info, &disp_commit);
 
 	if (copy_back) {
 		ret = copy_to_user(argp,
