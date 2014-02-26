@@ -390,7 +390,6 @@ static int apq8064_pm8921_therm_mitigation[] = {
 #define CHG_TERM_MA		100
 static struct pm8921_charger_platform_data
 apq8064_pm8921_chg_pdata __devinitdata = {
-	.safety_time		= 180,
 	.update_time		= 60000,
 	.max_voltage		= MAX_VOLTAGE_MV,
 	.min_voltage		= 3200,
@@ -429,6 +428,8 @@ apq8064_pm8921_bms_pdata __devinitdata = {
 	.shutdown_soc_valid_limit	= 20,
 	.adjust_soc_low_threshold	= 25,
 	.chg_term_ua			= CHG_TERM_MA * 1000,
+	.normal_voltage_calc_ms		= 20000,
+	.low_voltage_calc_ms		= 1000,
 };
 
 static struct pm8921_platform_data
@@ -508,4 +509,7 @@ void __init apq8064_init_pmic(void)
 	} else if (machine_is_apq8064_cdp()) {
 		apq8064_pm8921_chg_pdata.has_dc_supply = true;
 	}
+
+	if (!machine_is_apq8064_mtp() && !machine_is_apq8064_liquid())
+		apq8064_pm8921_chg_pdata.battery_less_hardware = 1;
 }

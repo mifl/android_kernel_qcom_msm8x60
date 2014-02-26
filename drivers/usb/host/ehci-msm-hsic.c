@@ -1279,6 +1279,7 @@ static irqreturn_t hsic_peripheral_status_change(int irq, void *dev_id)
 static irqreturn_t msm_hsic_wakeup_irq(int irq, void *data)
 {
 	struct msm_hsic_hcd *mehci = data;
+	int ret;
 
 	mehci->wakeup_int_cnt++;
 	dbg_log_event(NULL, "Remote Wakeup IRQ", mehci->wakeup_int_cnt);
@@ -1296,8 +1297,17 @@ static irqreturn_t msm_hsic_wakeup_irq(int irq, void *data)
 	spin_unlock(&mehci->wakeup_lock);
 
 	if (!atomic_read(&mehci->pm_usage_cnt)) {
-		atomic_set(&mehci->pm_usage_cnt, 1);
-		pm_runtime_get(mehci->dev);
+		ret = pm_runtime_get(mehci->dev);
+		/*
+		 * HSIC runtime resume can race with us.
+		 * if we are active (ret == 1) or resuming
+		 * (ret == -EINPROGRESS), decrement the
+		 * PM usage counter before returning.
+		 */
+		if ((ret == 1) || (ret == -EINPROGRESS))
+			pm_runtime_put_noidle(mehci->dev);
+		else
+			atomic_set(&mehci->pm_usage_cnt, 1);
 	}
 
 	return IRQ_HANDLED;
@@ -1521,6 +1531,8 @@ static int __devinit ehci_hsic_msm_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "Unable to create HCD\n");
 		return  -ENOMEM;
 	}
+
+	hcd_to_bus(hcd)->skip_resume = true;
 
 	hcd->irq = platform_get_irq(pdev, 0);
 	if (hcd->irq < 0) {
@@ -1790,6 +1802,16 @@ static int msm_hsic_pm_resume(struct device *dev)
 
 	if (device_may_wakeup(dev))
 		disable_irq_wake(hcd->irq);
+
+	/*
+	 * Keep HSIC in Low Power Mode if system is resumed
+	 * by any other wakeup source.  HSIC is resumed later
+	 * when remote wakeup is received or interface driver
+	 * start I/O.
+	 */
+	if (!atomic_read(&mehci->pm_usage_cnt) &&
+			pm_runtime_suspended(dev))
+		return 0;
 
 	ret = msm_hsic_resume(mehci);
 	if (ret)

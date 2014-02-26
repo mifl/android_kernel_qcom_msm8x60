@@ -1333,7 +1333,7 @@ static void vsync_isr_handler(void)
 }
 #endif
 
-static ssize_t vsync_show_event(struct device *dev,
+ssize_t mdp_dma_show_event(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
 	ssize_t ret = 0;
@@ -2239,15 +2239,6 @@ void mdp4_hw_init(void)
 }
 
 #endif
-static DEVICE_ATTR(vsync_event, S_IRUGO, vsync_show_event, NULL);
-static struct attribute *vsync_fs_attrs[] = {
-	&dev_attr_vsync_event.attr,
-	NULL,
-};
-static struct attribute_group vsync_fs_attr_group = {
-	.attrs = vsync_fs_attrs,
-};
-
 static int mdp_on(struct platform_device *pdev)
 {
 	int ret = 0;
@@ -2279,21 +2270,7 @@ static int mdp_on(struct platform_device *pdev)
 	if (mdp_rev == MDP_REV_303 && mfd->panel.type == MIPI_CMD_PANEL) {
 
 		vsync_cntrl.dev = mfd->fbi->dev;
-
-		if (!vsync_cntrl.sysfs_created) {
-			ret = sysfs_create_group(&vsync_cntrl.dev->kobj,
-				&vsync_fs_attr_group);
-			if (ret) {
-				pr_err("%s: sysfs creation failed, ret=%d\n",
-					__func__, ret);
-				return ret;
-			}
-
-			kobject_uevent(&vsync_cntrl.dev->kobj, KOBJ_ADD);
-			pr_debug("%s: kobject_uevent(KOBJ_ADD)\n", __func__);
-			vsync_cntrl.sysfs_created = 1;
-		}
-		atomic_set(&vsync_cntrl.suspend, 0);
+		atomic_set(&vsync_cntrl.suspend, 1);
 	}
 
 	mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_ON, FALSE);
@@ -2525,8 +2502,6 @@ static int mdp_probe(struct platform_device *pdev)
 #if defined(CONFIG_FB_MSM_MIPI_DSI) && defined(CONFIG_FB_MSM_MDP40)
 	struct mipi_panel_info *mipi;
 #endif
-	static int contSplash_update_done;
-	char *cp;
 	unsigned int mdp_r = 0;
 
 	if ((pdev->id == 0) && (pdev->num_resources > 0)) {
@@ -2607,57 +2582,7 @@ static int mdp_probe(struct platform_device *pdev)
 	/* link to the latest pdev */
 	mfd->pdev = msm_fb_dev;
 	mfd->mdp_rev = mdp_rev;
-
-	if (mdp_pdata) {
-		if (mdp_pdata->cont_splash_enabled) {
-			mfd->cont_splash_done = 0;
-
-			if (!contSplash_update_done) {
-				uint32 bpp = 3;
-				/*read panel wxh and calculate splash screen
-				size*/
-				mdp_pdata->splash_screen_size =
-						inpdw(MDP_BASE + 0x90004);
-				mdp_pdata->splash_screen_size =
-				(((mdp_pdata->splash_screen_size >> 16) &
-					0x00000FFF) * (
-					mdp_pdata->splash_screen_size &
-					0x00000FFF)) * bpp;
-
-				mdp_pdata->splash_screen_addr =
-						inpdw(MDP_BASE + 0x90008);
-
-				mfd->copy_splash_buf = dma_alloc_coherent(NULL,
-					mdp_pdata->splash_screen_size,
-					(dma_addr_t *) &(mfd->copy_splash_phys),
-					GFP_KERNEL);
-
-				if (!mfd->copy_splash_buf) {
-					pr_err("DMA ALLOC FAILED for SPLASH\n");
-					return -ENOMEM;
-				}
-				cp = (char *)ioremap(
-						mdp_pdata->splash_screen_addr,
-						mdp_pdata->splash_screen_size);
-				if (!cp) {
-					pr_err("IOREMAP FAILED for SPLASH\n");
-					return -ENOMEM;
-				}
-				memcpy(mfd->copy_splash_buf, cp,
-					mdp_pdata->splash_screen_size);
-
-				MDP_OUTP(MDP_BASE + 0x90008,
-						mfd->copy_splash_phys);
-
-				if (mfd->panel.type == MIPI_VIDEO_PANEL ||
-				    mfd->panel.type == LCDC_PANEL)
-					mdp_pipe_ctrl(MDP_CMD_BLOCK,
-						MDP_BLOCK_POWER_ON, FALSE);
-				contSplash_update_done = 1;
-			}
-		} else
-			mfd->cont_splash_done = 1;
-	}
+	mfd->vsync_init = NULL;
 
 	mfd->ov0_wb_buf = MDP_ALLOC(sizeof(struct mdp_buf_type));
 	mfd->ov1_wb_buf = MDP_ALLOC(sizeof(struct mdp_buf_type));
@@ -2687,6 +2612,53 @@ static int mdp_probe(struct platform_device *pdev)
 		rc = -ENOMEM;
 		goto mdp_probe_err;
 	}
+
+	if (mdp_pdata) {
+		if (mdp_pdata->cont_splash_enabled &&
+				 mfd->panel_info.pdest == DISPLAY_1) {
+			char *cp;
+			uint32 bpp = 3;
+			/*read panel wxh and calculate splash screen
+			  size*/
+			mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_ON, FALSE);
+
+			mdp_pdata->splash_screen_size =
+				inpdw(MDP_BASE + 0x90004);
+			mdp_pdata->splash_screen_size =
+				(((mdp_pdata->splash_screen_size >> 16) &
+				  0x00000FFF) * (
+					  mdp_pdata->splash_screen_size &
+					  0x00000FFF)) * bpp;
+
+			mdp_pdata->splash_screen_addr =
+				inpdw(MDP_BASE + 0x90008);
+
+			mfd->copy_splash_buf = dma_alloc_coherent(NULL,
+					mdp_pdata->splash_screen_size,
+					(dma_addr_t *) &(mfd->copy_splash_phys),
+					GFP_KERNEL);
+
+			if (!mfd->copy_splash_buf) {
+				pr_err("DMA ALLOC FAILED for SPLASH\n");
+				return -ENOMEM;
+			}
+			cp = (char *)ioremap(
+					mdp_pdata->splash_screen_addr,
+					mdp_pdata->splash_screen_size);
+			if (!cp) {
+				pr_err("IOREMAP FAILED for SPLASH\n");
+				return -ENOMEM;
+			}
+			memcpy(mfd->copy_splash_buf, cp,
+					mdp_pdata->splash_screen_size);
+
+			MDP_OUTP(MDP_BASE + 0x90008,
+					mfd->copy_splash_phys);
+		}
+
+		mfd->cont_splash_done = (1 - mdp_pdata->cont_splash_enabled);
+	}
+
 	/* data chain */
 	pdata = msm_fb_dev->dev.platform_data;
 	pdata->on = mdp_on;
@@ -2771,7 +2743,8 @@ static int mdp_probe(struct platform_device *pdev)
 	case MIPI_VIDEO_PANEL:
 #ifndef CONFIG_FB_MSM_MDP303
 		mipi = &mfd->panel_info.mipi;
-		mdp4_dsi_vsync_init(0);
+		mfd->vsync_init = mdp4_dsi_vsync_init;
+		mfd->vsync_show = mdp4_dsi_video_show_event;
 		mfd->hw_refresh = TRUE;
 		mfd->dma_fnc = mdp4_dsi_video_overlay;
 		mfd->lut_update = mdp_lut_update_lcdc;
@@ -2795,6 +2768,7 @@ static int mdp_probe(struct platform_device *pdev)
 		mfd->start_histogram = mdp_histogram_start;
 		mfd->stop_histogram = mdp_histogram_stop;
 		mfd->vsync_ctrl = mdp_dma_video_vsync_ctrl;
+		mfd->vsync_show = mdp_dma_video_show_event;
 		if (mfd->panel_info.pdest == DISPLAY_1)
 			mfd->dma = &dma2_data;
 		else {
@@ -2815,7 +2789,8 @@ static int mdp_probe(struct platform_device *pdev)
 #ifndef CONFIG_FB_MSM_MDP303
 		mfd->dma_fnc = mdp4_dsi_cmd_overlay;
 		mipi = &mfd->panel_info.mipi;
-		mdp4_dsi_rdptr_init(0);
+		mfd->vsync_init = mdp4_dsi_rdptr_init;
+		mfd->vsync_show = mdp4_dsi_cmd_show_event;
 		if (mfd->panel_info.pdest == DISPLAY_1) {
 			if_no = PRIMARY_INTF_SEL;
 			mfd->dma = &dma2_data;
@@ -2834,6 +2809,7 @@ static int mdp_probe(struct platform_device *pdev)
 		mfd->start_histogram = mdp_histogram_start;
 		mfd->stop_histogram = mdp_histogram_stop;
 		mfd->vsync_ctrl = mdp_dma_vsync_ctrl;
+		mfd->vsync_show = mdp_dma_show_event;
 		if (mfd->panel_info.pdest == DISPLAY_1)
 			mfd->dma = &dma2_data;
 		else {
@@ -2851,7 +2827,8 @@ static int mdp_probe(struct platform_device *pdev)
 
 #ifdef CONFIG_FB_MSM_DTV
 	case DTV_PANEL:
-		mdp4_dtv_vsync_init(0);
+		mfd->vsync_init = mdp4_dtv_vsync_init;
+		mfd->vsync_show = mdp4_dtv_show_event;
 		pdata->on = mdp4_dtv_on;
 		pdata->off = mdp4_dtv_off;
 		mfd->hw_refresh = TRUE;
@@ -2890,7 +2867,8 @@ static int mdp_probe(struct platform_device *pdev)
 #endif
 
 #ifdef CONFIG_FB_MSM_MDP40
-		mdp4_lcdc_vsync_init(0);
+		mfd->vsync_init = mdp4_lcdc_vsync_init;
+		mfd->vsync_show = mdp4_lcdc_show_event;
 		if (mfd->panel.type == HDMI_PANEL) {
 			mfd->dma = &dma_e_data;
 			mdp4_display_intf_sel(EXTERNAL_INTF_SEL, LCDC_RGB_INTF);
@@ -2901,6 +2879,7 @@ static int mdp_probe(struct platform_device *pdev)
 #else
 		mfd->dma = &dma2_data;
 		mfd->vsync_ctrl = mdp_dma_lcdc_vsync_ctrl;
+		mfd->vsync_show = mdp_dma_lcdc_show_event;
 		spin_lock_irqsave(&mdp_spin_lock, flag);
 		mdp_intr_mask &= ~MDP_DMA_P_DONE;
 		outp32(MDP_INTR_ENABLE, mdp_intr_mask);
@@ -2983,7 +2962,7 @@ static int mdp_probe(struct platform_device *pdev)
 	}
 
 	/* req bus bandwidth immediately */
-	if (!(mfd->cont_splash_done))
+	if (!(mfd->cont_splash_done) && (mfd->panel_info.pdest == DISPLAY_1))
 		mdp_bus_scale_update_request(5);
 
 #endif
@@ -3001,6 +2980,29 @@ static int mdp_probe(struct platform_device *pdev)
 
 	pdev_list[pdev_list_cnt++] = pdev;
 	mdp4_extn_disp = 0;
+
+	if (mfd->vsync_init != NULL) {
+		mfd->vsync_init(0);
+
+		if (!mfd->vsync_sysfs_created) {
+			mfd->dev_attr.attr.name = "vsync_event";
+			mfd->dev_attr.attr.mode = S_IRUGO;
+			mfd->dev_attr.show = mfd->vsync_show;
+			sysfs_attr_init(&mfd->dev_attr.attr);
+
+			rc = sysfs_create_file(&mfd->fbi->dev->kobj,
+							&mfd->dev_attr.attr);
+			if (rc) {
+				pr_err("%s: sysfs creation failed, ret=%d\n",
+					__func__, rc);
+				return rc;
+			}
+
+			kobject_uevent(&mfd->fbi->dev->kobj, KOBJ_ADD);
+			pr_debug("%s: kobject_uevent(KOBJ_ADD)\n", __func__);
+			mfd->vsync_sysfs_created = 1;
+		}
+	}
 	return 0;
 
       mdp_probe_err:
