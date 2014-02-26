@@ -77,8 +77,6 @@ VREG_CONSUMERS(L9) = {
 	REGULATOR_SUPPLY("cam_vana",            "4-0020"),
 	REGULATOR_SUPPLY("cam_vaf",             "4-0020"),
 	REGULATOR_SUPPLY("vdd",			"12-0018"),
-	REGULATOR_SUPPLY("cam_vana",    "4-0010"),
-	REGULATOR_SUPPLY("cam_vaf",     "4-0010"),
 	REGULATOR_SUPPLY("vdd",			"12-0068"),
 };
 VREG_CONSUMERS(L10) = {
@@ -106,7 +104,6 @@ VREG_CONSUMERS(L12) = {
 	REGULATOR_SUPPLY("cam_vdig",		"4-006c"),
 	REGULATOR_SUPPLY("cam_vdig",		"4-0048"),
 	REGULATOR_SUPPLY("cam_vdig",            "4-0020"),
-	REGULATOR_SUPPLY("cam_vdig",        "4-0010"),
 };
 VREG_CONSUMERS(L13) = {
 	REGULATOR_SUPPLY("8038_l13",		NULL),
@@ -204,7 +201,6 @@ VREG_CONSUMERS(LVS1) = {
 	REGULATOR_SUPPLY("cam_vio",		"4-006c"),
 	REGULATOR_SUPPLY("cam_vio",		"4-0048"),
 	REGULATOR_SUPPLY("cam_vio",             "4-0020"),
-	REGULATOR_SUPPLY("cam_vio",     "4-0010"),
 };
 VREG_CONSUMERS(LVS2) = {
 	REGULATOR_SUPPLY("8038_lvs2",		NULL),

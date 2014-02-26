@@ -16,10 +16,8 @@
 #include "msm.h"
 #include "msm_ispif.h"
 #include "msm_camera_i2c_mux.h"
+
 /*=============================================================*/
-
-extern void imx175_eeprom_init(void);
-
 void msm_sensor_adjust_frame_lines1(struct msm_sensor_ctrl_t *s_ctrl)
 {
 	uint16_t cur_line = 0;
@@ -1683,11 +1681,6 @@ int32_t msm_sensor_i2c_probe(struct i2c_client *client,
 	if (rc < 0)
 		goto probe_fail;
 
-	if (s_ctrl->sensordata->eeprom_info &&
-		s_ctrl->sensordata->eeprom_info->type == MSM_EEPROM_SPI) {
-		imx175_eeprom_init();
-	}
-
 	if (!s_ctrl->wait_num_frames)
 		s_ctrl->wait_num_frames = 1 * Q10;
 
@@ -1941,8 +1934,13 @@ DEFINE_SIMPLE_ATTRIBUTE(sensor_debugfs_test, NULL,
 
 int msm_sensor_enable_debugfs(struct msm_sensor_ctrl_t *s_ctrl)
 {
-	struct dentry *sensor_dir;
-	sensor_dir = debugfs_create_dir("msm_sensor", NULL);
+	struct dentry *debugfs_base, *sensor_dir;
+	debugfs_base = debugfs_create_dir("msm_sensor", NULL);
+	if (!debugfs_base)
+		return -ENOMEM;
+
+	sensor_dir = debugfs_create_dir
+		(s_ctrl->sensordata->sensor_name, debugfs_base);
 	if (!sensor_dir)
 		return -ENOMEM;
 
