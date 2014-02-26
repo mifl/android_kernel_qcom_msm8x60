@@ -237,9 +237,6 @@
 #define MSM_CAM_IOCTL_AXI_RELEASE \
 	_IO(MSM_CAM_IOCTL_MAGIC, 67)
 
-#define MSM_CAM_IOCTL_CHROMATIX_PARMS \
-	_IOWR(MSM_CAM_IOCTL_MAGIC, 68, struct chromatix_params)
-
 struct v4l2_event_and_payload {
 	struct v4l2_event evt;
 	uint32_t payload_length;
@@ -287,7 +284,7 @@ struct msm_mctl_post_proc_cmd {
 #define MAX_ACTUATOR_INIT_SET 12
 #define MAX_ACTUATOR_TYPE_SIZE 32
 #define MAX_ACTUATOR_REG_TBL_SIZE 8
-#define MAX_EEPROM_NAME 32
+
 
 #define MSM_MAX_CAMERA_CONFIGS 2
 
@@ -1350,11 +1347,6 @@ struct mirror_flip {
 struct cord {
 	uint32_t x;
 	uint32_t y;
-};
-
-struct chromatix_params {
-	uint32_t chromatix_size;
-	uint8_t *chromatix;
 };
 
 struct msm_eeprom_data_t {
