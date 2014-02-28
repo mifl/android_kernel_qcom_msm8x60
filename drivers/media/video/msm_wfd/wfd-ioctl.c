@@ -179,32 +179,7 @@ static int wfd_allocate_ion_buffer(struct ion_client *client,
 		goto alloc_fail;
 	}
 
-	if (secure) {
-		WFD_MSG_INFO("%s: calling ion_phys", __func__);
-		rc = ion_phys(client,
-			handle,
-			(unsigned long *)&phys_addr, (size_t *)&size);
-	} else {
-		WFD_MSG_INFO("%s: calling ion_map_iommu", __func__);
-		rc = ion_map_iommu(client, handle,
-				VIDEO_DOMAIN, VIDEO_MAIN_POOL, SZ_4K,
-				0, (unsigned long *)&phys_addr,
-				&size, 0, 0);
-	}
-
-	if (rc || !phys_addr) {
-		WFD_MSG_ERR(
-			"Failed to get physical addr, rc = %d, phys_addr = 0x%p\n",
-			rc, phys_addr);
-		goto alloc_fail;
-	} else if (size < mregion->size) {
-		WFD_MSG_ERR("Failed to map enough memory\n");
-		rc = -ENOMEM;
-		goto alloc_fail;
-	}
-
 	mregion->kvaddr = kvaddr;
-	mregion->paddr = phys_addr;
 	mregion->ion_handle = handle;
 
 	return rc;
@@ -274,6 +249,7 @@ int wfd_allocate_input_buffers(struct wfd_device *wfd_dev,
 	spin_unlock_irqrestore(&inst->inst_lock, flags);
 
 	for (i = 0; i < VENC_INPUT_BUFFERS; ++i) {
+		struct mem_region_map mmap_context = {0};
 		mpair = kzalloc(sizeof(*mpair), GFP_KERNEL);
 		enc_mregion = kzalloc(sizeof(*enc_mregion), GFP_KERNEL);
 		mdp_mregion = kzalloc(sizeof(*enc_mregion), GFP_KERNEL);
@@ -282,12 +258,20 @@ int wfd_allocate_input_buffers(struct wfd_device *wfd_dev,
 		rc = wfd_allocate_ion_buffer(wfd_dev->ion_client,
 				wfd_dev->secure_device, enc_mregion);
 		if (rc) {
-			WFD_MSG_ERR("Failed to allocate input memory."
-				" This error causes memory leak!!!\n");
+			WFD_MSG_ERR("Failed to allocate input memory\n");
 			goto alloc_fail;
 		}
 
-		WFD_MSG_DBG("NOTE: enc paddr = %p, kvaddr = %p\n",
+		mmap_context.mregion = enc_mregion;
+		mmap_context.ion_client = wfd_dev->ion_client;
+		rc = v4l2_subdev_call(&wfd_dev->enc_sdev, core, ioctl,
+				ENC_MMAP, &mmap_context);
+		if (rc || !enc_mregion->paddr) {
+			WFD_MSG_ERR("Failed to map input memory\n");
+			goto alloc_fail;
+		}
+
+		WFD_MSG_ERR("NOTE: enc paddr = %p, kvaddr = %p\n",
 				enc_mregion->paddr,
 				enc_mregion->kvaddr);
 
@@ -302,27 +286,12 @@ int wfd_allocate_input_buffers(struct wfd_device *wfd_dev,
 		mdp_mregion->cookie = 0;
 		mdp_mregion->ion_handle = enc_mregion->ion_handle;
 
-		if (wfd_dev->mdp_iommu_split_domain) {
-			if (wfd_dev->secure_device) {
-				rc = ion_phys(wfd_dev->ion_client,
-					mdp_mregion->ion_handle,
-					(unsigned long *)&mdp_mregion->paddr,
-					(size_t *)&mdp_mregion->size);
-			} else {
-				rc = ion_map_iommu(wfd_dev->ion_client,
-					mdp_mregion->ion_handle,
-					DISPLAY_WRITE_DOMAIN, GEN_POOL, SZ_4K,
-					0, (unsigned long *)&mdp_mregion->paddr,
-					(unsigned long *)&mdp_mregion->size,
-					0, 0);
-			}
-		} else {
-			rc = ion_map_iommu(wfd_dev->ion_client,
-				mdp_mregion->ion_handle,
-				DISPLAY_READ_DOMAIN, GEN_POOL, SZ_4K,
-				0, (unsigned long *)&mdp_mregion->paddr,
-				(unsigned long *)&mdp_mregion->size, 0, 0);
-		}
+		memset(&mmap_context, 0, sizeof(mmap_context));
+		mmap_context.mregion = mdp_mregion;
+		mmap_context.ion_client = wfd_dev->ion_client;
+		mmap_context.cookie = inst->mdp_inst;
+		rc = v4l2_subdev_call(&wfd_dev->mdp_sdev, core, ioctl,
+				MDP_MMAP, (void *)&mmap_context);
 
 		if (rc || !mdp_mregion->paddr) {
 			WFD_MSG_ERR(
@@ -402,24 +371,24 @@ void wfd_free_input_buffers(struct wfd_device *wfd_dev,
 						"from encoder\n");
 
 			if (mpair->mdp->paddr) {
-				if (wfd_dev->mdp_iommu_split_domain) {
-					if (!wfd_dev->secure_device)
-						ion_unmap_iommu(wfd_dev->
-							ion_client,
-							mpair->mdp->ion_handle,
-							DISPLAY_WRITE_DOMAIN,
-							GEN_POOL);
-				} else {
-					ion_unmap_iommu(wfd_dev->ion_client,
-						mpair->mdp->ion_handle,
-						DISPLAY_READ_DOMAIN, GEN_POOL);
-				}
+				struct mem_region_map temp = {0};
+
+				temp.ion_client = wfd_dev->ion_client;
+				temp.mregion = mpair->mdp;
+				temp.cookie = inst->mdp_inst;
+
+				v4l2_subdev_call(&wfd_dev->mdp_sdev, core,
+						ioctl, MDP_MUNMAP,
+						(void *)&temp);
 			}
 
-			if (mpair->enc->paddr && !wfd_dev->secure_device)
-				ion_unmap_iommu(wfd_dev->ion_client,
-						mpair->enc->ion_handle,
-						VIDEO_DOMAIN, VIDEO_MAIN_POOL);
+			if (mpair->enc->paddr) {
+				struct mem_region_map temp = {0};
+				temp.ion_client = wfd_dev->ion_client;
+				temp.mregion = mpair->enc;
+				v4l2_subdev_call(&wfd_dev->enc_sdev,
+					core, ioctl, ENC_MUNMAP, &temp);
+			}
 
 			wfd_free_ion_buffer(wfd_dev->ion_client, mpair->enc);
 			list_del(&mpair->list);
