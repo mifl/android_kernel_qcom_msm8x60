@@ -151,12 +151,11 @@ static unsigned long wfd_enc_addr_to_mdp_addr(struct wfd_inst *inst,
 static int wfd_allocate_ion_buffer(struct ion_client *client,
 		bool secure, struct mem_region *mregion)
 {
-	struct ion_handle *handle;
-	void *kvaddr = NULL, *phys_addr = NULL;
-	unsigned long size;
+	struct ion_handle *handle = NULL;
+	void *kvaddr = NULL;
 	unsigned int alloc_regions = 0;
 	unsigned int ion_flags = 0;
-	int rc;
+	int rc = 0;
 
 	alloc_regions = ION_HEAP(ION_CP_MM_HEAP_ID);
 	alloc_regions |= secure ? 0 :
