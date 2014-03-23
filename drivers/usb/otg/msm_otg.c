@@ -1081,6 +1081,8 @@ static int msm_otg_notify_power_supply(struct msm_otg *motg, unsigned mA)
 		return 0;
 	}
 	/* Set max current limit */
+	dev_info(motg->phy.dev, "current: %d -> %d (mA)\n",
+			motg->cur_power, mA);
 	if (power_supply_set_current_limit(psy, 1000*mA))
 		goto psy_not_supported;
 
