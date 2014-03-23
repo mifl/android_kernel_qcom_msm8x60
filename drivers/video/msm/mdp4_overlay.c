@@ -844,6 +844,26 @@ void mdp4_overlay_vg_setup(struct mdp4_overlay_pipe *pipe)
 	format = mdp4_overlay_format(pipe);
 	pattern = mdp4_overlay_unpack_pattern(pipe);
 
+	/* CSC Post Processing enabled? */
+	if (pipe->flags & MDP_OVERLAY_PP_CFG_EN) {
+		if (pipe->pp_cfg.config_ops & MDP_OVERLAY_PP_CSC_CFG) {
+			if (pipe->pp_cfg.csc_cfg.flags & MDP_CSC_FLAG_ENABLE)
+				pipe->op_mode |= MDP4_OP_CSC_EN;
+			if (pipe->pp_cfg.csc_cfg.flags & MDP_CSC_FLAG_YUV_IN)
+				pipe->op_mode |= MDP4_OP_SRC_DATA_YCBCR;
+			if (pipe->pp_cfg.csc_cfg.flags & MDP_CSC_FLAG_YUV_OUT)
+				pipe->op_mode |= MDP4_OP_DST_DATA_YCBCR;
+
+			mdp4_csc_write(&pipe->pp_cfg.csc_cfg,
+				(uint32_t) (vg_base + MDP4_VIDEO_CSC_OFF));
+		}
+		if (pipe->pp_cfg.config_ops & MDP_OVERLAY_PP_QSEED_CFG) {
+			mdp4_qseed_access_cfg(&pipe->pp_cfg.qseed_cfg[0],
+							(uint32_t) vg_base);
+			mdp4_qseed_access_cfg(&pipe->pp_cfg.qseed_cfg[1],
+							(uint32_t) vg_base);
+		}
+	}
 	/* not RGB use VG pipe, pure VG pipe */
 	if (ptype != OVERLAY_TYPE_RGB)
 		pipe->op_mode |= (MDP4_OP_CSC_EN | MDP4_OP_SRC_DATA_YCBCR);
@@ -3055,6 +3075,60 @@ int mdp4_overlay_set(struct fb_info *info, struct mdp_overlay *req)
 
 	mdp4_overlay_mdp_pipe_req(pipe, mfd);
 
+	if (pipe->flags & MDP_OVERLAY_PP_CFG_EN) {
+		if (pipe->pipe_num <= OVERLAY_PIPE_VG2)
+			memcpy(&pipe->pp_cfg, &req->overlay_pp_cfg,
+					sizeof(struct mdp_overlay_pp_params));
+		else
+			pr_debug("%s: RGB Pipes don't support CSC/QSEED\n",
+								__func__);
+	}
+
+	if (ctrl->panel_mode & MDP4_PANEL_DTV &&
+	    pipe->mixer_num == MDP4_MIXER1) {
+		u32 use_blt = mdp4_overlay_blt_enable(req, mfd, perf_level);
+
+		if (hdmi_prim_display) {
+			if (!mdp4_overlay_is_rgb_type(req->src.format) &&
+				pipe->pipe_type == OVERLAY_TYPE_VIDEO &&
+				(req->src_rect.h > req->dst_rect.h ||
+				req->src_rect.w > req->dst_rect.w))
+				use_blt = 1;
+		}
+
+		mdp4_overlay_dtv_set(mfd, pipe);
+		mfd->use_ov1_blt &= ~(1 << (pipe->pipe_ndx-1));
+		mfd->use_ov1_blt |= (use_blt << (pipe->pipe_ndx-1));
+	}
+
+	if (new_perf_level != perf_level) {
+		u32 old_level = new_perf_level;
+		mdp4_update_perf_level(perf_level);
+
+		/* change clck base on perf level */
+		if (pipe->mixer_num == MDP4_MIXER0) {
+			if (ctrl->panel_mode & MDP4_PANEL_DSI_VIDEO) {
+				if (old_level > perf_level)
+					mdp4_set_perf_level();
+			} else if (ctrl->panel_mode & MDP4_PANEL_DSI_CMD) {
+				mdp4_dsi_cmd_dma_busy_wait(mfd);
+				mdp4_dsi_blt_dmap_busy_wait(mfd);
+				mdp4_set_perf_level();
+			} else if (ctrl->panel_mode & MDP4_PANEL_LCDC) {
+				if (old_level > perf_level)
+					mdp4_set_perf_level();
+			} else if (ctrl->panel_mode & MDP4_PANEL_MDDI) {
+				mdp4_mddi_dma_busy_wait(mfd);
+				mdp4_mddi_blt_dmap_busy_wait(mfd);
+				mdp4_set_perf_level();
+			}
+		} else {
+			if (ctrl->panel_mode & MDP4_PANEL_DTV) {
+				mdp4_overlay_reg_flush(pipe, 0);
+				mdp4_overlay_dtv_ov_done_push(mfd, pipe);
+			}
+		}
+	}
 	mutex_unlock(&mfd->dma->ov_mutex);
 
 	return 0;
