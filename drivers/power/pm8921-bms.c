@@ -22,6 +22,7 @@
 #include <linux/mfd/pm8xxx/pm8xxx-adc.h>
 #include <linux/mfd/pm8xxx/pm8921-charger.h>
 #include <linux/mfd/pm8xxx/ccadc.h>
+#include <linux/power/bq51051b_charger.h>
 #include <linux/interrupt.h>
 #include <linux/bitops.h>
 #include <linux/debugfs.h>
@@ -160,7 +161,7 @@ static DEFINE_MUTEX(soc_invalidation_mutex);
 static int shutdown_soc_invalid;
 static struct pm8921_bms_chip *the_chip;
 
-#define DEFAULT_RBATT_MOHMS		128
+#define DEFAULT_RBATT_MOHMS			200
 #define DEFAULT_OCV_MICROVOLTS		3900000
 #define DEFAULT_CHARGE_CYCLES		0
 
@@ -349,9 +350,25 @@ static int pm_bms_masked_write(struct pm8921_bms_chip *chip, u16 addr,
 	return 0;
 }
 
-static int usb_chg_plugged_in(void)
+static int usb_chg_plugged_in(struct pm8921_bms_chip *chip)
 {
 	int val = pm8921_is_usb_chg_plugged_in();
+
+	/* if the charger driver was not initialized, use the restart reason */
+	if (val == -EINVAL) {
+		if (pm8xxx_restart_reason(chip->dev->parent)
+				== PM8XXX_RESTART_CHG)
+			val = 1;
+		else
+			val = 0;
+	}
+
+	return val;
+}
+
+static int wireless_chg_plugged_in(void)
+{
+	int val = bq51051b_wireless_plugged_in();
 
 	/* treat as if usb is not present in case of error */
 	if (val == -EINVAL)
@@ -947,7 +964,8 @@ int override_mode_simultaneous_battery_voltage_and_current(int *ibat_ua,
 
 	mutex_unlock(&the_chip->bms_output_lock);
 
-	usb_chg = usb_chg_plugged_in();
+	usb_chg = usb_chg_plugged_in(the_chip);
+	usb_chg |= wireless_chg_plugged_in();
 
 	convert_vbatt_raw_to_uv(the_chip, usb_chg, vbat_raw, vbat_uv);
 	convert_vsense_to_uv(the_chip, vsense_raw, &vsense_uv);
@@ -988,7 +1006,8 @@ static int read_soc_params_raw(struct pm8921_bms_chip *chip,
 	pm_bms_unlock_output_data(chip);
 	mutex_unlock(&chip->bms_output_lock);
 
-	usb_chg =  usb_chg_plugged_in();
+	usb_chg =  usb_chg_plugged_in(chip);
+	usb_chg |= wireless_chg_plugged_in();
 
 	if (chip->prev_last_good_ocv_raw == 0) {
 		chip->prev_last_good_ocv_raw = raw->last_good_ocv_raw;
@@ -1764,17 +1783,13 @@ static int adjust_soc(struct pm8921_bms_chip *chip, int soc,
 	 * soc = 0 should happen only when soc_est == 0
 	 */
 	if (soc_new == 0 && soc_est != 0)
-		soc_new = 1;
+		soc_new = 2;
 
 	soc = soc_new;
 
 out:
-	pr_debug("ibat_ua = %d, vbat_uv = %d, ocv_est_uv = %d, pc_est = %d, "
-		"soc_est = %d, n = %d, delta_ocv_uv = %d, last_ocv_uv = %d, "
-		"pc_new = %d, soc_new = %d, rbatt = %d, m = %d\n",
-		ibat_ua, vbat_uv, ocv_est_uv, pc_est,
-		soc_est, n, delta_ocv_uv, chip->last_ocv_uv,
-		pc_new, soc_new, rbatt, m);
+	pr_info("ibat_ua = %d, vbat_uv = %d, soc = %d, batt_temp=%d\n",
+			ibat_ua, vbat_uv, soc, batt_temp);
 
 	return soc;
 }
@@ -2309,7 +2324,8 @@ static void calib_hkadc(struct pm8921_bms_chip *chip)
 	}
 	voltage = xoadc_reading_to_microvolt(result.adc_code);
 
-	usb_chg = usb_chg_plugged_in();
+	usb_chg = usb_chg_plugged_in(chip);
+	usb_chg |= wireless_chg_plugged_in();
 	pr_debug("result 0.625V = 0x%x, voltage = %duV adc_meas = %lld "
 				"usb_chg = %d\n",
 				result.adc_code, voltage, result.measurement,
@@ -2796,7 +2812,8 @@ static void check_initial_ocv(struct pm8921_bms_chip *chip)
 	 */
 	ocv_uv = 0;
 	pm_bms_read_output_data(chip, LAST_GOOD_OCV_VALUE, &ocv_raw);
-	usb_chg = usb_chg_plugged_in();
+	usb_chg = usb_chg_plugged_in(chip);
+	usb_chg |= wireless_chg_plugged_in();
 	rc = convert_vbatt_raw_to_uv(chip, usb_chg, ocv_raw, &ocv_uv);
 	if (rc || ocv_uv == 0) {
 		rc = adc_based_ocv(chip, &ocv_uv);
@@ -2837,6 +2854,8 @@ static int set_battery_data(struct pm8921_bms_chip *chip)
 		goto desay;
 	else if (chip->batt_type == BATT_PALLADIUM)
 		goto palladium;
+	else if (chip->batt_type == BATT_LGE)
+		goto lge;
 
 	battery_id = read_battery_id(chip);
 	if (battery_id < 0) {
@@ -2874,6 +2893,17 @@ desay:
 		chip->rbatt_sf_lut = desay_5200_data.rbatt_sf_lut;
 		chip->default_rbatt_mohm = desay_5200_data.default_rbatt_mohm;
 		chip->delta_rbatt_mohm = desay_5200_data.delta_rbatt_mohm;
+		return 0;
+lge:
+		chip->fcc = lge_2100_mako_data.fcc;
+		chip->fcc_temp_lut = lge_2100_mako_data.fcc_temp_lut;
+		chip->fcc_sf_lut = lge_2100_mako_data.fcc_sf_lut;
+		chip->pc_temp_ocv_lut = lge_2100_mako_data.pc_temp_ocv_lut;
+		chip->pc_sf_lut = lge_2100_mako_data.pc_sf_lut;
+		chip->rbatt_sf_lut = lge_2100_mako_data.rbatt_sf_lut;
+		chip->default_rbatt_mohm
+				= lge_2100_mako_data.default_rbatt_mohm;
+		chip->delta_rbatt_mohm = lge_2100_mako_data.delta_rbatt_mohm;
 		return 0;
 }
 
@@ -3196,7 +3226,7 @@ restore_sbi_config:
 static int __devinit pm8921_bms_probe(struct platform_device *pdev)
 {
 	int rc = 0;
-	int vbatt;
+	int vbatt = 0;
 	struct pm8921_bms_chip *chip;
 	const struct pm8921_bms_platform_data *pdata
 				= pdev->dev.platform_data;
