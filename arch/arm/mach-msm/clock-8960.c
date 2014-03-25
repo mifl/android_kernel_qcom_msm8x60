@@ -4040,6 +4040,7 @@ static struct rcg_clk rot_clk = {
 	},
 };
 
+#ifdef CONFIG_FB_MSM_HDMI_MSM_PANEL
 static int hdmi_pll_clk_enable(struct clk *c)
 {
 	int ret;
@@ -4108,6 +4109,11 @@ static struct clk_freq_tbl clk_tbl_tv[] = {
 	F_TV(148500000, hdmi_pll, 148500000, 1, 0, 0),
 	F_END
 };
+#else
+static struct clk_freq_tbl clk_tbl_tv[] = {
+	F_END
+};
+#endif
 
 static unsigned long fmax_tv_src_8064[VDD_DIG_NUM] = {
 	[VDD_DIG_LOW]     =  74250000,
@@ -4120,11 +4126,13 @@ static unsigned long fmax_tv_src_8064[VDD_DIG_NUM] = {
  */
 void set_rate_tv(struct rcg_clk *rcg, struct clk_freq_tbl *nf)
 {
+#ifdef CONFIG_FB_MSM_HDMI_MSM_PANEL
 	unsigned long pll_rate = (unsigned long)nf->extra_freq_data;
 	if (pll_rate) {
 		hdmi_pll_set_rate(pll_rate);
 		hdmi_pll_clk.rate = pll_rate;
 	}
+#endif
 	set_rate_mnd(rcg, nf);
 }
 
