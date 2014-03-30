@@ -15,6 +15,10 @@
  *
  */
 
+#ifdef CONFIG_PANTECH_CAMERA
+#include <mach/board_pantech.h>
+#else /* CONFIG_PANTECH_CAMERA */
+
 #ifndef __ASM_ARCH_MSM_BOARD_H
 #define __ASM_ARCH_MSM_BOARD_H
 
@@ -616,3 +620,5 @@ extern unsigned int msm_shared_ram_phys; /* defined in arch/arm/mach-msm/io.c */
 
 
 #endif
+
+#endif /* CONFIG_PANTECH_CAMERA */

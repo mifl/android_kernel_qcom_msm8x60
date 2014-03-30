@@ -11,6 +11,10 @@
  *
  */
 
+#ifdef CONFIG_PANTECH_CAMERA
+#include <mach/camera_pantech.h>
+#else /* CONFIG_PANTECH_CAMERA */
+
 #ifndef __ASM__ARCH_CAMERA_H
 #define __ASM__ARCH_CAMERA_H
 
@@ -705,3 +709,5 @@ int msm_camera_request_gpio_table
 void msm_camera_bus_scale_cfg(uint32_t bus_perf_client,
 		enum msm_bus_perf_setting perf_setting);
 #endif
+
+#endif /* CONFIG_PANTECH_CAMERA */

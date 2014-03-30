@@ -10,6 +10,11 @@
  * GNU General Public License for more details.
  *
  */
+
+#ifdef CONFIG_PANTECH_CAMERA
+#include <linux/media/msm_camera_pantech.h>
+#else /* CONFIG_PANTECH_CAMERA */
+
 #ifndef __LINUX_MSM_CAMERA_H
 #define __LINUX_MSM_CAMERA_H
 
@@ -2262,3 +2267,5 @@ struct msm_ver_num_info {
 	(handle |= (0x1 << 7) | (data & 0x7F))
 
 #endif /* __LINUX_MSM_CAMERA_H */
+
+#endif /* CONFIG_PANTECH_CAMERA */
