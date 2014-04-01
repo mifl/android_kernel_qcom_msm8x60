@@ -26,7 +26,6 @@
 #include <linux/spi/spi.h>
 #include <linux/slimbus/slimbus.h>
 #include <linux/bootmem.h>
-#include <linux/msm_kgsl.h>
 #ifdef CONFIG_ANDROID_PMEM
 #include <linux/android_pmem.h>
 #endif
@@ -47,6 +46,10 @@
 #include <linux/slimbus/slimbus.h>
 #include <linux/mfd/wcd9xxx/core.h>
 #include <linux/mfd/wcd9xxx/pdata.h>
+
+#ifdef CONFIG_STM_LIS3DH
+#include <linux/input/lis3dh.h>
+#endif
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
@@ -80,6 +83,7 @@
 #include <linux/fmem.h>
 #include <mach/msm_cache_dump.h>
 
+#include <mach/kgsl.h>
 #ifdef CONFIG_INPUT_MPU3050
 #include <linux/input/mpu3050.h>
 #endif
@@ -137,7 +141,7 @@ struct sx150x_platform_data msm8930_sx150x_data[] = {
 
 #ifdef CONFIG_MSM_MULTIMEDIA_USE_ION
 #define HOLE_SIZE	0x20000
-#define MSM_PMEM_KERNEL_EBI1_SIZE  0x65000
+#define MSM_CONTIG_MEM_SIZE  0x65000
 #ifdef CONFIG_MSM_IOMMU
 #define MSM_ION_MM_SIZE            0x3800000 /* Need to be multiple of 64K */
 #define MSM_ION_SF_SIZE            0x0
@@ -164,18 +168,18 @@ struct sx150x_platform_data msm8930_sx150x_data[] = {
 #define MSM8930_FW_START	MSM8930_FIXED_AREA_START
 
 #else
-#define MSM_PMEM_KERNEL_EBI1_SIZE  0x110C000
+#define MSM_CONTIG_MEM_SIZE  0x110C000
 #define MSM_ION_HEAP_NUM	1
 #endif
 
-#ifdef CONFIG_KERNEL_PMEM_EBI_REGION
-static unsigned pmem_kernel_ebi1_size = MSM_PMEM_KERNEL_EBI1_SIZE;
-static int __init pmem_kernel_ebi1_size_setup(char *p)
+#ifdef CONFIG_KERNEL_MSM_CONTIG_MEM_REGION
+static unsigned msm_contig_mem_size = MSM_CONTIG_MEM_SIZE;
+static int __init msm_contig_mem_size_setup(char *p)
 {
-	pmem_kernel_ebi1_size = memparse(p, NULL);
+	msm_contig_mem_size = memparse(p, NULL);
 	return 0;
 }
-early_param("pmem_kernel_ebi1_size", pmem_kernel_ebi1_size_setup);
+early_param("msm_contig_mem_size", msm_contig_mem_size_setup);
 #endif
 
 #ifdef CONFIG_ANDROID_PMEM
@@ -318,7 +322,7 @@ static void __init reserve_pmem_memory(void)
 	reserve_memory_for(&android_pmem_pdata);
 	reserve_memory_for(&android_pmem_audio_pdata);
 #endif /*CONFIG_MSM_MULTIMEDIA_USE_ION*/
-	msm8930_reserve_table[MEMTYPE_EBI1].size += pmem_kernel_ebi1_size;
+	msm8930_reserve_table[MEMTYPE_EBI1].size += msm_contig_mem_size;
 #endif /*CONFIG_ANDROID_PMEM*/
 }
 
@@ -1505,6 +1509,9 @@ static struct msm_otg_platform_data msm_otg_pdata = {
 #ifdef CONFIG_MSM_BUS_SCALING
 	.bus_scale_table	= &usb_bus_scale_pdata,
 #endif
+#ifdef CONFIG_FB_MSM_HDMI_MHL_8334
+	.mhl_dev_name		= "sii8334",
+#endif
 	.mpm_otgsessvld_int	= MSM_MPM_PIN_USB1_OTGSESSVLD,
 };
 #endif
@@ -2166,10 +2173,10 @@ static struct platform_device msm_tsens_device = {
 
 static struct msm_thermal_data msm_thermal_pdata = {
 	.sensor_id = 9,
-	.poll_ms = 1000,
-	.limit_temp = 60,
-	.temp_hysteresis = 10,
-	.limit_freq = 918000,
+	.poll_ms = 250,
+	.limit_temp_degC = 60,
+	.temp_hysteresis_degC = 10,
+	.freq_step = 2,
 };
 
 #ifdef CONFIG_MSM_FAKE_BATTERY
@@ -2303,14 +2310,11 @@ static struct platform_device *common_devices[] __initdata = {
 	&msm8930_ion_dev,
 #endif
 	&msm_device_tz_log,
-
-#ifdef CONFIG_MSM_QDSS
-	&msm_qdss_device,
-	&msm_etb_device,
-	&msm_tpiu_device,
-	&msm_funnel_device,
-	&msm_etm_device,
-#endif
+	&coresight_tpiu_device,
+	&coresight_etb_device,
+	&coresight_funnel_device,
+	&coresight_etm0_device,
+	&coresight_etm1_device,
 	&msm_device_dspcrashd_8960,
 	&msm8960_device_watchdog,
 #ifdef MSM8930_PHASE_2
@@ -2482,12 +2486,6 @@ static struct msm_pm_boot_platform_data msm_pm_boot_pdata __initdata = {
 	.mode = MSM_PM_BOOT_CONFIG_TZ,
 };
 
-static struct msm_pm_sleep_status_data msm_pm_slp_sts_data = {
-	.base_addr = MSM_ACC0_BASE + 0x08,
-	.cpu_offset = MSM_ACC1_BASE - MSM_ACC0_BASE,
-	.mask = 1UL << 13,
-};
-
 #ifdef CONFIG_I2C
 #define I2C_SURF 1
 #define I2C_FFA  (1 << 1)
@@ -2513,6 +2511,7 @@ static struct mpu3050_gyro_platform_data mpu3050_gyro = {
 static struct i2c_board_info __initdata mpu3050_i2c_boardinfo[] = {
 	{
 		I2C_BOARD_INFO("mpu3050", 0x68),
+		.irq = MSM_GPIO_TO_INT(MPU3050_INT_GPIO),
 		.platform_data = &mpu3050_gyro,
 	},
 };
@@ -2537,6 +2536,31 @@ static struct i2c_board_info isl_charger_i2c_info[] __initdata = {
 	},
 };
 #endif /* CONFIG_ISL9519_CHARGER */
+
+#ifdef CONFIG_STM_LIS3DH
+static struct lis3dh_acc_platform_data lis3dh_accel = {
+	.poll_interval = 200,
+	.min_interval = 10,
+	.g_range = LIS3DH_ACC_G_2G,
+	.axis_map_x = 1,
+	.axis_map_y = 0,
+	.axis_map_z = 2,
+	.negate_x = 0,
+	.negate_y = 0,
+	.negate_z = 1,
+	.init = NULL,
+	.exit = NULL,
+	.gpio_int1 = -EINVAL,
+	.gpio_int2 = -EINVAL,
+};
+
+static struct i2c_board_info __initdata lis3dh_i2c_boardinfo[] = {
+	{
+		I2C_BOARD_INFO(LIS3DH_ACC_DEV_NAME, 0x18),
+		.platform_data = &lis3dh_accel,
+	},
+};
+#endif /* CONFIG_STM_LIS3DH */
 
 static struct i2c_registry msm8960_i2c_devices[] __initdata = {
 #ifdef CONFIG_ISL9519_CHARGER
@@ -2573,6 +2597,14 @@ static struct i2c_registry msm8960_i2c_devices[] __initdata = {
 		sii_device_info,
 		ARRAY_SIZE(sii_device_info),
 	},
+#ifdef CONFIG_STM_LIS3DH
+	{
+		I2C_FFA | I2C_FLUID,
+		MSM_8930_GSBI12_QUP_I2C_BUS_ID,
+		lis3dh_i2c_boardinfo,
+		ARRAY_SIZE(lis3dh_i2c_boardinfo),
+	},
+#endif
 };
 #endif /* CONFIG_I2C */
 
@@ -2621,6 +2653,7 @@ static void __init msm8930_cdp_init(void)
 	if (meminfo_init(SYS_MEMORY, SZ_256M) < 0)
 		pr_err("meminfo_init() failed!\n");
 
+	platform_device_register(&msm_gpio_device);
 	msm_tsens_early_init(&msm_tsens_pdata);
 	msm_thermal_init(&msm_thermal_pdata);
 	BUG_ON(msm_rpm_init(&msm8930_rpm_data));
@@ -2655,7 +2688,12 @@ static void __init msm8930_cdp_init(void)
 	msm_spm_init(msm_spm_data, ARRAY_SIZE(msm_spm_data));
 	msm_spm_l2_init(msm_spm_l2_data);
 	msm8930_init_buses();
-	platform_add_devices(msm8930_footswitch, msm8930_num_footswitch);
+	if (cpu_is_msm8627())
+		platform_add_devices(msm8627_footswitch,
+				msm8627_num_footswitch);
+	else
+		platform_add_devices(msm8930_footswitch,
+				msm8930_num_footswitch);
 	if (cpu_is_msm8627())
 		platform_device_register(&msm8627_device_acpuclk);
 	else if (cpu_is_msm8930())
@@ -2686,7 +2724,6 @@ static void __init msm8930_cdp_init(void)
 		ARRAY_SIZE(msm_slim_devices));
 	change_memory_power = &msm8930_change_memory_power;
 	BUG_ON(msm_pm_boot_init(&msm_pm_boot_pdata));
-	msm_pm_init_sleep_status_data(&msm_pm_slp_sts_data);
 	msm_pm_set_tz_retention_flag(1);
 
 	if (PLATFORM_IS_CHARM25())

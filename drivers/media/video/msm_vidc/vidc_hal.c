@@ -15,6 +15,9 @@
 #include <linux/workqueue.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
+#include <linux/delay.h>
+#include <mach/ocmem.h>
+
 #include <asm/memory.h>
 #include "vidc_hal.h"
 #include "vidc_hal_io.h"
@@ -23,7 +26,7 @@
 #define REG_ADDR_OFFSET_BITMASK	0x000FFFFF
 
 /*Workaround for virtio */
-#define HFI_VIRTIO_FW_BIAS		0x14f00000
+#define HFI_VIRTIO_FW_BIAS		0x0
 
 struct hal_device_data hal_ctxt;
 
@@ -300,10 +303,12 @@ static int read_queue(void *info, u8 *packet, u32 *pb_tx_req_is_set)
 	return 0;
 }
 
-static int vidc_hal_alloc(void *mem, void *clnt, u32 size, u32 align, u32 flags)
+static int vidc_hal_alloc(void *mem, void *clnt, u32 size, u32 align, u32 flags,
+		int domain)
 {
 	struct vidc_mem_addr *vmem;
 	struct msm_smem *alloc;
+	int rc = 0;
 
 	if (!mem || !clnt || !size) {
 		HAL_MSG_ERROR("Invalid Params in %s", __func__);
@@ -312,20 +317,29 @@ static int vidc_hal_alloc(void *mem, void *clnt, u32 size, u32 align, u32 flags)
 	vmem = (struct vidc_mem_addr *)mem;
 	HAL_MSG_HIGH("start to alloc: size:%d, Flags: %d", size, flags);
 
-	alloc  = msm_smem_alloc(clnt, size, align, flags);
+	alloc  = msm_smem_alloc(clnt, size, align, flags, domain, 1, 1);
 	HAL_MSG_LOW("Alloc done");
 	if (!alloc) {
 		HAL_MSG_HIGH("Alloc fail in %s", __func__);
-		return -ENOMEM;
-	} else {
-		HAL_MSG_MEDIUM("vidc_hal_alloc:ptr=%p,size=%d",
-					   alloc->kvaddr, size);
-		vmem->mem_size = alloc->size;
-		vmem->mem_data = alloc;
-		vmem->align_virtual_addr = (u8 *) alloc->kvaddr;
-		vmem->align_device_addr = (u8 *)alloc->device_addr;
+		rc = -ENOMEM;
+		goto fail_smem_alloc;
 	}
-	return 0;
+	rc = msm_smem_clean_invalidate(clnt, alloc);
+	if (rc) {
+		pr_err("NOTE: Failed to clean caches\n");
+		goto fail_clean_cache;
+	}
+	HAL_MSG_MEDIUM("vidc_hal_alloc:ptr=%p,size=%d",
+			alloc->kvaddr, size);
+	vmem->mem_size = alloc->size;
+	vmem->mem_data = alloc;
+	vmem->align_virtual_addr = (u8 *) alloc->kvaddr;
+	vmem->align_device_addr = (u8 *)alloc->device_addr;
+	return rc;
+fail_clean_cache:
+	msm_smem_free(clnt, alloc);
+fail_smem_alloc:
+	return rc;
 }
 
 static void vidc_hal_free(struct smem_client *clnt, struct msm_smem *mem)
@@ -503,7 +517,7 @@ static void vidc_hal_interface_queues_release(struct hal_device *device)
 	device->hal_client = NULL;
 }
 
-static int vidc_hal_interface_queues_init(struct hal_device *dev)
+static int vidc_hal_interface_queues_init(struct hal_device *dev, int domain)
 {
 	struct hfi_queue_table_header *q_tbl_hdr;
 	struct hfi_queue_header *q_hdr;
@@ -513,7 +527,7 @@ static int vidc_hal_interface_queues_init(struct hal_device *dev)
 
 	rc = vidc_hal_alloc((void *) &dev->iface_q_table,
 					dev->hal_client,
-			VIDC_IFACEQ_TABLE_SIZE, 1, 0);
+			VIDC_IFACEQ_TABLE_SIZE, 1, SMEM_UNCACHED, domain);
 	if (rc) {
 		HAL_MSG_ERROR("%s:iface_q_table_alloc_fail", __func__);
 		return -ENOMEM;
@@ -533,7 +547,7 @@ static int vidc_hal_interface_queues_init(struct hal_device *dev)
 		iface_q = &dev->iface_queues[i];
 		rc = vidc_hal_alloc((void *) &iface_q->q_array,
 				dev->hal_client, VIDC_IFACEQ_QUEUE_SIZE,
-				1, 0);
+				1, SMEM_UNCACHED, domain);
 		if (rc) {
 			HAL_MSG_ERROR("%s:iface_q_table_alloc[%d]_fail",
 						__func__, i);
@@ -585,6 +599,7 @@ static int vidc_hal_core_start_cpu(struct hal_device *device)
 		ctrl_status = read_register(
 		device->hal_data->register_base_addr,
 		VIDC_CPU_CS_SCIACMDARG0);
+		usleep_range(500, 1000);
 		count++;
 	}
 	if (count >= 25)
@@ -592,7 +607,7 @@ static int vidc_hal_core_start_cpu(struct hal_device *device)
 	return rc;
 }
 
-int vidc_hal_core_init(void *device)
+int vidc_hal_core_init(void *device, int domain)
 {
 	struct hfi_cmd_sys_init_packet pkt;
 	int rc = 0;
@@ -609,6 +624,10 @@ int vidc_hal_core_init(void *device)
 	spin_lock_init(&dev->read_lock);
 	spin_lock_init(&dev->write_lock);
 
+	/*Disable Dynamic clock gating for Venus VBIF*/
+	write_register(dev->hal_data->register_base_addr,
+				   VIDC_VENUS_VBIF_CLK_ON, 1, 0);
+
 	if (!dev->hal_client) {
 		dev->hal_client = msm_smem_new_client(SMEM_ION);
 		if (dev->hal_client == NULL) {
@@ -619,10 +638,10 @@ int vidc_hal_core_init(void *device)
 
 		HAL_MSG_ERROR("Device_Virt_Address : 0x%x,"
 		"Register_Virt_Addr: 0x%x",
-		(u32) dev->hal_data->device_base_addr,
+		dev->hal_data->device_base_addr,
 		(u32) dev->hal_data->register_base_addr);
 
-		rc = vidc_hal_interface_queues_init(dev);
+		rc = vidc_hal_interface_queues_init(dev, domain);
 		if (rc) {
 			HAL_MSG_ERROR("failed to init queues");
 			rc = -ENOMEM;
@@ -665,6 +684,8 @@ int vidc_hal_core_release(void *device)
 	}
 	write_register(dev->hal_data->register_base_addr,
 		VIDC_CPU_CS_SCIACMDARG3, 0, 0);
+	disable_irq_nosync(dev->hal_data->irq);
+	vidc_hal_interface_queues_release(dev);
 	HAL_MSG_INFO("\nHAL exited\n");
 	return 0;
 }
@@ -744,12 +765,12 @@ int vidc_hal_core_set_resource(void *device,
 		struct hfi_resource_ocmem *hfioc_mem =
 			(struct hfi_resource_ocmem *)
 			&pkt->rg_resource_data[0];
-		struct vidc_mem_addr *vidc_oc_mem =
-			(struct vidc_mem_addr *) resource_value;
+		struct ocmem_buf *ocmem =
+			(struct ocmem_buf *) resource_value;
 
 		pkt->resource_type = HFI_RESOURCE_OCMEM;
-		hfioc_mem->size = (u32) vidc_oc_mem->mem_size;
-		hfioc_mem->mem = (u8 *) vidc_oc_mem->align_device_addr;
+		hfioc_mem->size = (u32) ocmem->len;
+		hfioc_mem->mem = (u8 *) ocmem->addr;
 		pkt->size += sizeof(struct hfi_resource_ocmem);
 		if (vidc_hal_iface_cmdq_write(dev, pkt))
 			rc = -ENOTEMPTY;
@@ -1118,6 +1139,7 @@ int vidc_hal_session_set_property(void *sess,
 	case HAL_CONFIG_VENC_REQUEST_IFRAME:
 		pkt->rg_property_data[0] =
 			HFI_PROPERTY_CONFIG_VENC_REQUEST_SYNC_FRAME;
+		pkt->size += sizeof(u32);
 		break;
 	case HAL_PARAM_VENC_MPEG4_SHORT_HEADER:
 		break;
@@ -1193,9 +1215,11 @@ int vidc_hal_session_set_property(void *sess,
 	}
 	case HAL_PARAM_VENC_RATE_CONTROL:
 	{
+		u32 *rc_mode;
 		pkt->rg_property_data[0] =
 			HFI_PROPERTY_PARAM_VENC_RATE_CONTROL;
-		switch ((enum hal_rate_control)pdata) {
+		rc_mode = (u32 *)pdata;
+		switch ((enum hal_rate_control) *rc_mode) {
 		case HAL_RATE_CONTROL_OFF:
 		pkt->rg_property_data[1] = HFI_RATE_CONTROL_OFF;
 			break;
@@ -1270,18 +1294,6 @@ int vidc_hal_session_set_property(void *sess,
 		hfi->slice_beta_offset = prop->slice_beta_offset;
 		pkt->size += sizeof(u32) +
 			sizeof(struct hfi_h264_db_control);
-		break;
-	}
-	case HAL_PARAM_VENC_TEMPORAL_SPATIAL_TRADEOFF:
-	{
-		struct hfi_temporal_spatial_tradeoff *hfi;
-		pkt->rg_property_data[0] =
-			HFI_PROPERTY_PARAM_VENC_TEMPORAL_SPATIAL_TRADEOFF;
-		hfi = (struct hfi_temporal_spatial_tradeoff *)
-			&pkt->rg_property_data[1];
-		hfi->ts_factor = ((struct hfi_temporal_spatial_tradeoff *)
-					pdata)->ts_factor;
-		pkt->size += sizeof(u32)  * 2;
 		break;
 	}
 	case HAL_PARAM_VENC_SESSION_QP:
@@ -1504,8 +1516,6 @@ int vidc_hal_session_get_property(void *sess,
 	case HAL_PARAM_VENC_MPEG4_HEADER_EXTENSION:
 		break;
 	case HAL_PARAM_VENC_H264_DEBLOCK_CONTROL:
-		break;
-	case HAL_PARAM_VENC_TEMPORAL_SPATIAL_TRADEOFF:
 		break;
 	case HAL_PARAM_VENC_SESSION_QP:
 		break;
@@ -2000,11 +2010,11 @@ static int vidc_hal_check_core_registered(
 		list_for_each_safe(curr, next, &core.dev_head) {
 			device = list_entry(curr, struct hal_device, list);
 			if (device && device->hal_data->irq == irq &&
-				(CONTAINS((u32)device->hal_data->
+				(CONTAINS(device->hal_data->
 						device_base_addr,
 						FIRMWARE_SIZE, fw_addr) ||
 				CONTAINS(fw_addr, FIRMWARE_SIZE,
-						(u32)device->hal_data->
+						device->hal_data->
 						device_base_addr) ||
 				CONTAINS((u32)device->hal_data->
 						register_base_addr,
@@ -2018,12 +2028,12 @@ static int vidc_hal_check_core_registered(
 				OVERLAPS(reg_addr, reg_size,
 						(u32)device->hal_data->
 						register_base_addr, reg_size) ||
-				OVERLAPS((u32)device->hal_data->
+				OVERLAPS(device->hal_data->
 						device_base_addr,
 						FIRMWARE_SIZE, fw_addr,
 						FIRMWARE_SIZE) ||
 				OVERLAPS(fw_addr, FIRMWARE_SIZE,
-						(u32)device->hal_data->
+						device->hal_data->
 						device_base_addr,
 						FIRMWARE_SIZE))) {
 				return 0;
@@ -2073,7 +2083,7 @@ void *vidc_hal_add_device(u32 device_id, u32 fw_base_addr, u32 reg_base,
 	struct hal_data *hal = NULL;
 	int rc = 0;
 
-	if (device_id || !fw_base_addr || !reg_base || !reg_size ||
+	if (device_id || !reg_base || !reg_size ||
 			!irq || !callback) {
 		HAL_MSG_ERROR("Invalid Paramters");
 		return NULL;
@@ -2091,13 +2101,7 @@ void *vidc_hal_add_device(u32 device_id, u32 fw_base_addr, u32 reg_base,
 			return NULL;
 		}
 		hal->irq = irq;
-		hal->device_base_addr =
-			ioremap_nocache(fw_base_addr, FIRMWARE_SIZE);
-		if (!hal->device_base_addr) {
-			HAL_MSG_ERROR("could not map fw addr %d of size %d",
-						  fw_base_addr, FIRMWARE_SIZE);
-			goto err_map;
-		}
+		hal->device_base_addr = fw_base_addr;
 		hal->register_base_addr =
 			ioremap_nocache(reg_base, reg_size);
 		if (!hal->register_base_addr) {

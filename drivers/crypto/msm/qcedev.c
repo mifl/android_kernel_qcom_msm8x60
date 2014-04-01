@@ -2028,21 +2028,8 @@ static int qcedev_probe(struct platform_device *pdev)
 	struct qcedev_control *podev;
 	struct msm_ce_hw_support *platform_support;
 
-	if (pdev->id >= MAX_QCE_DEVICE) {
-		pr_err("%s: device id %d  exceeds allowed %d\n",
-			__func__, pdev->id, MAX_QCE_DEVICE);
-		return -ENOENT;
-	}
-	podev = &qce_dev[pdev->id];
+	podev = &qce_dev[0];
 
-	platform_support = (struct msm_ce_hw_support *)pdev->dev.platform_data;
-	podev->platform_support.ce_shared = platform_support->ce_shared;
-	podev->platform_support.shared_ce_resource =
-				platform_support->shared_ce_resource;
-	podev->platform_support.hw_key_support =
-				platform_support->hw_key_support;
-	podev->platform_support.bus_scale_table =
-				platform_support->bus_scale_table;
 	podev->ce_lock_count = 0;
 	podev->high_bw_req_count = 0;
 	INIT_LIST_HEAD(&podev->ready_commands);
@@ -2062,7 +2049,6 @@ static int qcedev_probe(struct platform_device *pdev)
 	podev->qce = handle;
 	podev->pdev = pdev;
 	platform_set_drvdata(pdev, podev);
-	qce_hw_support(podev->qce, &podev->ce_support);
 
 	if (podev->platform_support.bus_scale_table != NULL) {
 		podev->bus_scale_handle =
@@ -2077,7 +2063,25 @@ static int qcedev_probe(struct platform_device *pdev)
 		}
 	}
 	rc = misc_register(&podev->miscdevice);
-
+	qce_hw_support(podev->qce, &podev->ce_support);
+	if (podev->ce_support.bam) {
+		podev->platform_support.ce_shared = 0;
+		podev->platform_support.shared_ce_resource = 0;
+		podev->platform_support.hw_key_support = 0;
+		podev->platform_support.bus_scale_table = NULL;
+		podev->platform_support.sha_hmac = 1;
+	} else {
+		platform_support =
+			(struct msm_ce_hw_support *)pdev->dev.platform_data;
+		podev->platform_support.ce_shared = platform_support->ce_shared;
+		podev->platform_support.shared_ce_resource =
+				platform_support->shared_ce_resource;
+		podev->platform_support.hw_key_support =
+				platform_support->hw_key_support;
+		podev->platform_support.bus_scale_table =
+				platform_support->bus_scale_table;
+		podev->platform_support.sha_hmac = platform_support->sha_hmac;
+	}
 	if (rc >= 0)
 		return 0;
 	else
@@ -2113,12 +2117,19 @@ static int qcedev_remove(struct platform_device *pdev)
 	return 0;
 };
 
+static struct of_device_id qcedev_match[] = {
+	{	.compatible = "qcom,qcedev",
+	},
+	{}
+};
+
 static struct platform_driver qcedev_plat_driver = {
 	.probe = qcedev_probe,
 	.remove = qcedev_remove,
 	.driver = {
 		.name = "qce",
 		.owner = THIS_MODULE,
+		.of_match_table = qcedev_match,
 	},
 };
 
@@ -2239,9 +2250,7 @@ static void qcedev_exit(void)
 }
 
 MODULE_LICENSE("GPL v2");
-MODULE_AUTHOR("Mona Hossain <mhossain@codeaurora.org>");
 MODULE_DESCRIPTION("Qualcomm DEV Crypto driver");
-MODULE_VERSION("1.26");
 
 module_init(qcedev_init);
 module_exit(qcedev_exit);

@@ -1,4 +1,4 @@
-/* Copyright (c) 2012, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -2698,24 +2698,46 @@ static void a3xx_start(struct adreno_device *adreno_dev)
 	struct kgsl_device *device = &adreno_dev->dev;
 
 	/* Set up 16 deep read/write request queues */
+	if (adreno_dev->gpurev == ADRENO_REV_A330) {
+		adreno_regwrite(device, A3XX_VBIF_IN_RD_LIM_CONF0, 0x01010101);
+		adreno_regwrite(device, A3XX_VBIF_IN_RD_LIM_CONF1, 0x01010101);
+		adreno_regwrite(device, A3XX_VBIF_OUT_RD_LIM_CONF0, 0x01010101);
+		adreno_regwrite(device, A3XX_VBIF_OUT_WR_LIM_CONF0, 0x01010101);
+		adreno_regwrite(device, A3XX_VBIF_DDR_OUT_MAX_BURST, 0x0000303);
+		adreno_regwrite(device, A3XX_VBIF_IN_WR_LIM_CONF0, 0x01010101);
+		adreno_regwrite(device, A3XX_VBIF_IN_WR_LIM_CONF1, 0x01010101);
+		/* Enable WR-REQ */
+		adreno_regwrite(device, A3XX_VBIF_GATE_OFF_WRREQ_EN, 0x00003F);
 
-	adreno_regwrite(device, A3XX_VBIF_IN_RD_LIM_CONF0, 0x10101010);
-	adreno_regwrite(device, A3XX_VBIF_IN_RD_LIM_CONF1, 0x10101010);
-	adreno_regwrite(device, A3XX_VBIF_OUT_RD_LIM_CONF0, 0x10101010);
-	adreno_regwrite(device, A3XX_VBIF_OUT_WR_LIM_CONF0, 0x10101010);
-	adreno_regwrite(device, A3XX_VBIF_DDR_OUT_MAX_BURST, 0x00000303);
-	adreno_regwrite(device, A3XX_VBIF_IN_WR_LIM_CONF0, 0x10101010);
-	adreno_regwrite(device, A3XX_VBIF_IN_WR_LIM_CONF1, 0x10101010);
+		/* Set up round robin arbitration between both AXI ports */
+		adreno_regwrite(device, A3XX_VBIF_ARB_CTL, 0x00000030);
+		/* Set up VBIF_ROUND_ROBIN_QOS_ARB */
+		adreno_regwrite(device, A3XX_VBIF_ROUND_ROBIN_QOS_ARB, 0x0001);
 
-	/* Enable WR-REQ */
-	adreno_regwrite(device, A3XX_VBIF_GATE_OFF_WRREQ_EN, 0x000000FF);
+		/* Set up AOOO */
+		adreno_regwrite(device, A3XX_VBIF_OUT_AXI_AOOO_EN, 0x0000FFFF);
+		adreno_regwrite(device, A3XX_VBIF_OUT_AXI_AOOO, 0xFFFFFFFF);
 
-	/* Set up round robin arbitration between both AXI ports */
-	adreno_regwrite(device, A3XX_VBIF_ARB_CTL, 0x00000030);
+		/* Enable 1K sort */
+		adreno_regwrite(device, A3XX_VBIF_ABIT_SORT, 0x1FFFF);
+		adreno_regwrite(device, A3XX_VBIF_ABIT_SORT_CONF, 0x000000A4);
+	} else {
+		adreno_regwrite(device, A3XX_VBIF_IN_RD_LIM_CONF0, 0x10101010);
+		adreno_regwrite(device, A3XX_VBIF_IN_RD_LIM_CONF1, 0x10101010);
+		adreno_regwrite(device, A3XX_VBIF_OUT_RD_LIM_CONF0, 0x10101010);
+		adreno_regwrite(device, A3XX_VBIF_OUT_WR_LIM_CONF0, 0x10101010);
+		adreno_regwrite(device, A3XX_VBIF_DDR_OUT_MAX_BURST, 0x0000303);
+		adreno_regwrite(device, A3XX_VBIF_IN_WR_LIM_CONF0, 0x10101010);
+		adreno_regwrite(device, A3XX_VBIF_IN_WR_LIM_CONF1, 0x10101010);
+		/* Enable WR-REQ */
+		adreno_regwrite(device, A3XX_VBIF_GATE_OFF_WRREQ_EN, 0x0000FF);
 
-	/* Set up AOOO */
-	adreno_regwrite(device, A3XX_VBIF_OUT_AXI_AOOO_EN, 0x0000003C);
-	adreno_regwrite(device, A3XX_VBIF_OUT_AXI_AOOO, 0x003C003C);
+		/* Set up round robin arbitration between both AXI ports */
+		adreno_regwrite(device, A3XX_VBIF_ARB_CTL, 0x00000030);
+		/* Set up AOOO */
+		adreno_regwrite(device, A3XX_VBIF_OUT_AXI_AOOO_EN, 0x0000003C);
+		adreno_regwrite(device, A3XX_VBIF_OUT_AXI_AOOO, 0x003C003C);
+	}
 
 	if (cpu_is_apq8064()) {
 		/* Enable 1K sort */

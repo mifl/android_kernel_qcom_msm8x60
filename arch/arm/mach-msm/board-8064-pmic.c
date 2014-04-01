@@ -127,6 +127,7 @@ static struct pm8xxx_gpio_init pm8921_gpios[] __initdata = {
 	/* TABLA CODEC RESET */
 	PM8921_GPIO_OUTPUT(34, 1, MED),
 	PM8921_GPIO_OUTPUT(13, 0, HIGH),               /* PCIE_CLK_PWR_EN */
+	PM8921_GPIO_INPUT(12, PM_GPIO_PULL_UP_30),     /* PCIE_WAKE_N */
 };
 
 static struct pm8xxx_gpio_init pm8921_mtp_kp_gpios[] __initdata = {
@@ -138,6 +139,12 @@ static struct pm8xxx_gpio_init pm8921_cdp_kp_gpios[] __initdata = {
 	PM8921_GPIO_INPUT(27, PM_GPIO_PULL_UP_30),
 	PM8921_GPIO_INPUT(42, PM_GPIO_PULL_UP_30),
 	PM8921_GPIO_INPUT(17, PM_GPIO_PULL_UP_1P5),	/* SD_WP */
+};
+
+static struct pm8xxx_gpio_init pm8921_mpq_gpios[] __initdata = {
+	PM8921_GPIO_INIT(27, PM_GPIO_DIR_IN, PM_GPIO_OUT_BUF_CMOS, 0,
+			PM_GPIO_PULL_NO, PM_GPIO_VIN_VPH, PM_GPIO_STRENGTH_NO,
+			PM_GPIO_FUNC_NORMAL, 0, 0),
 };
 
 /* Initial PM8XXX MPP configurations */
@@ -178,6 +185,18 @@ void __init apq8064_pm8xxx_gpio_mpp_init(void)
 		for (i = 0; i < ARRAY_SIZE(pm8921_mtp_kp_gpios); i++) {
 			rc = pm8xxx_gpio_config(pm8921_mtp_kp_gpios[i].gpio,
 						&pm8921_mtp_kp_gpios[i].config);
+			if (rc) {
+				pr_err("%s: pm8xxx_gpio_config: rc=%d\n",
+					__func__, rc);
+				break;
+			}
+		}
+
+	if (machine_is_mpq8064_cdp() || machine_is_mpq8064_hrd()
+					|| machine_is_mpq8064_dtv())
+		for (i = 0; i < ARRAY_SIZE(pm8921_mpq_gpios); i++) {
+			rc = pm8xxx_gpio_config(pm8921_mpq_gpios[i].gpio,
+						&pm8921_mpq_gpios[i].config);
 			if (rc) {
 				pr_err("%s: pm8xxx_gpio_config: rc=%d\n",
 					__func__, rc);
@@ -445,10 +464,7 @@ void __init apq8064_init_pmic(void)
 	apq8064_pm8921_platform_data.num_regulators =
 					msm8064_pm8921_regulator_pdata_len;
 
-	if (machine_is_apq8064_rumi3()) {
-		apq8064_pm8921_irq_pdata.devirq = 0;
-		apq8064_pm8821_irq_pdata.devirq = 0;
-	} else if (machine_is_apq8064_mtp()) {
+	if (machine_is_apq8064_mtp()) {
 		apq8064_pm8921_bms_pdata.battery_type = BATT_PALLADIUM;
 	} else if (machine_is_apq8064_liquid()) {
 		apq8064_pm8921_bms_pdata.battery_type = BATT_DESAY;

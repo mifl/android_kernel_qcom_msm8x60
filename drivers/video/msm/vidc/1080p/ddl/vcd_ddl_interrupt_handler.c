@@ -161,11 +161,6 @@ static u32 ddl_encoder_seq_done_callback(struct ddl_context *ddl_context,
 	encoder = &ddl->codec_data.encoder;
 	vidc_1080p_get_encoder_sequence_header_size(
 		&encoder->seq_header_length);
-	if ((encoder->codec.codec == VCD_CODEC_H264) &&
-		(encoder->profile.profile == VCD_PROFILE_H264_BASELINE))
-		if ((encoder->seq_header.align_virtual_addr) &&
-			(encoder->seq_header_length > 6))
-			encoder->seq_header.align_virtual_addr[6] = 0xC0;
 	ddl_context->ddl_callback(VCD_EVT_RESP_START, VCD_S_SUCCESS,
 		NULL, 0, (u32 *) ddl, ddl->client_data);
 	ddl_release_command_channel(ddl_context,
@@ -371,10 +366,6 @@ static u32 ddl_decoder_seq_done_callback(struct ddl_context *ddl_context,
 			need_reconfig = ddl_check_reconfig(ddl);
 			DDL_MSG_HIGH("%s : need_reconfig = %u\n", __func__,
 				 need_reconfig);
-			if (input_vcd_frm->flags &
-				  VCD_FRAME_FLAG_EOS) {
-				need_reconfig = false;
-			}
 			if (((input_vcd_frm->flags &
 				VCD_FRAME_FLAG_CODECCONFIG) &&
 				(!(input_vcd_frm->flags &
@@ -1335,6 +1326,7 @@ static u32 ddl_decoder_output_done_callback(
 		ddl_process_decoder_metadata(ddl);
 		vidc_sm_get_aspect_ratio_info(
 			&ddl->shared_mem[ddl->command_channel],
+			decoder->codec.codec,
 			&output_vcd_frm->aspect_ratio_info);
 		ddl_context->ddl_callback(VCD_EVT_RESP_OUTPUT_DONE,
 			vcd_status, output_frame,

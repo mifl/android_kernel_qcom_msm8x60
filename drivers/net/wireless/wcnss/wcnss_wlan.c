@@ -21,6 +21,7 @@
 #include <linux/workqueue.h>
 #include <linux/jiffies.h>
 #include <linux/gpio.h>
+#include <linux/wakelock.h>
 #include <mach/peripheral-loader.h>
 #include <mach/msm_smd.h>
 #ifdef CONFIG_WCNSS_MEM_PRE_ALLOC
@@ -52,6 +53,7 @@ static struct {
 	void		(*tm_notify)(struct device *, int);
 	struct wcnss_wlan_config wlan_config;
 	struct delayed_work wcnss_work;
+	struct wake_lock wcnss_wake_lock;
 } *penv = NULL;
 
 static ssize_t wcnss_serial_number_show(struct device *dev,
@@ -64,7 +66,7 @@ static ssize_t wcnss_serial_number_show(struct device *dev,
 }
 
 static ssize_t wcnss_serial_number_store(struct device *dev,
-		struct device_attribute *attr, const char * buf, size_t count)
+		struct device_attribute *attr, const char *buf, size_t count)
 {
 	unsigned int value;
 
@@ -92,7 +94,7 @@ static ssize_t wcnss_thermal_mitigation_show(struct device *dev,
 }
 
 static ssize_t wcnss_thermal_mitigation_store(struct device *dev,
-		struct device_attribute *attr, const char * buf, size_t count)
+		struct device_attribute *attr, const char *buf, size_t count)
 {
 	int value;
 
@@ -187,6 +189,12 @@ wcnss_wlan_ctrl_probe(struct platform_device *pdev)
 
 	return 0;
 }
+
+void wcnss_flush_delayed_boot_votes()
+{
+	flush_delayed_work_sync(&penv->wcnss_work);
+}
+EXPORT_SYMBOL(wcnss_flush_delayed_boot_votes);
 
 static int __devexit
 wcnss_wlan_ctrl_remove(struct platform_device *pdev)
@@ -324,6 +332,20 @@ static int wcnss_wlan_resume(struct device *dev)
 	return 0;
 }
 
+void wcnss_prevent_suspend()
+{
+	if (penv)
+		wake_lock(&penv->wcnss_wake_lock);
+}
+EXPORT_SYMBOL(wcnss_prevent_suspend);
+
+void wcnss_allow_suspend()
+{
+	if (penv)
+		wake_unlock(&penv->wcnss_wake_lock);
+}
+EXPORT_SYMBOL(wcnss_allow_suspend);
+
 static int
 wcnss_trigger_config(struct platform_device *pdev)
 {
@@ -395,6 +417,8 @@ wcnss_trigger_config(struct platform_device *pdev)
 	ret = wcnss_create_sysfs(&pdev->dev);
 	if (ret)
 		goto fail_sysfs;
+
+	wake_lock_init(&penv->wcnss_wake_lock, WAKE_LOCK_SUSPEND, "wcnss");
 
 	return 0;
 

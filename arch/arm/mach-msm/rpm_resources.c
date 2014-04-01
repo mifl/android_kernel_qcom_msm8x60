@@ -968,7 +968,7 @@ static int msm_rpmrs_enter_sleep(uint32_t sclk_count, void *limits,
 			return rc;
 
 		if (msm_rpmrs_use_mpm(limits))
-			msm_mpm_enter_sleep(from_idle);
+			msm_mpm_enter_sleep(sclk_count, from_idle);
 	}
 
 	rc = msm_rpmrs_flush_L2(limits, notify_rpm);
@@ -1107,7 +1107,7 @@ static struct msm_pm_sleep_ops msm_rpmrs_ops = {
 static int __init msm_rpmrs_l2_init(void)
 {
 	if (cpu_is_msm8960() || cpu_is_msm8930() || cpu_is_msm8930aa() ||
-	    cpu_is_apq8064() || cpu_is_msm8627()) {
+	    cpu_is_apq8064() || cpu_is_msm8627() || cpu_is_msm8960ab()) {
 
 		msm_pm_set_l2_flush_flag(0);
 
