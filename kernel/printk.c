@@ -41,7 +41,6 @@
 #include <linux/cpu.h>
 #include <linux/notifier.h>
 #include <linux/rculist.h>
-#include <linux/coresight-stm.h>
 
 #include <asm/uaccess.h>
 
@@ -960,8 +959,6 @@ asmlinkage int vprintk(const char *fmt, va_list args)
 		}
 	}
 
-	stm_log(OST_ENTITY_PRINTK, printk_buf, printed_len);
-
 	/*
 	 * Copy the output into log_buf. If the caller didn't provide
 	 * the appropriate log prefix, we insert them here
@@ -1227,13 +1224,13 @@ static int __cpuinit console_cpu_notify(struct notifier_block *self,
 	unsigned long action, void *hcpu)
 {
 	switch (action) {
-	case CPU_ONLINE:
 	case CPU_DEAD:
 	case CPU_DOWN_FAILED:
 	case CPU_UP_CANCELED:
 		console_lock();
 		console_unlock();
 		break;
+	case CPU_ONLINE:
 	case CPU_DYING:
 		/* invoked with preemption disabled, so defer */
 		if (!console_trylock())

@@ -1,4 +1,4 @@
-/* Copyright (c) 2012, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -300,9 +300,11 @@ static void msm_gpio_irq_unmask(struct irq_data *d)
 
 	spin_lock_irqsave(&tlmm_lock, irq_flags);
 	__set_bit(gpio, msm_gpio.enabled_irqs);
-	__msm_gpio_set_intr_status(gpio);
-	__msm_gpio_set_intr_cfg_enable(gpio, 1);
-	mb();
+	if (!__msm_gpio_get_intr_cfg_enable(gpio)) {
+		__msm_gpio_set_intr_status(gpio);
+		__msm_gpio_set_intr_cfg_enable(gpio, 1);
+		mb();
+	}
 	spin_unlock_irqrestore(&tlmm_lock, irq_flags);
 
 	if (msm_gpio_irq_extn.irq_mask)
@@ -341,8 +343,10 @@ static int msm_gpio_irq_set_type(struct irq_data *d, unsigned int flow_type)
 	mb();
 	spin_unlock_irqrestore(&tlmm_lock, irq_flags);
 
-	if (msm_gpio_irq_extn.irq_set_type)
-		msm_gpio_irq_extn.irq_set_type(d, flow_type);
+	if ((flow_type & IRQ_TYPE_EDGE_BOTH) != IRQ_TYPE_EDGE_BOTH) {
+		if (msm_gpio_irq_extn.irq_set_type)
+			msm_gpio_irq_extn.irq_set_type(d, flow_type);
+	}
 
 	return 0;
 }

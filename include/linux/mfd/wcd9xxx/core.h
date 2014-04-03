@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -129,6 +129,7 @@ struct wcd9xxx {
 	struct mutex io_lock;
 	struct mutex xfer_lock;
 	struct mutex irq_lock;
+	struct mutex nested_irq_lock;
 	u8 version;
 
 	unsigned int irq_base;
@@ -157,10 +158,7 @@ struct wcd9xxx {
 	int num_rx_port;
 	int num_tx_port;
 
-	u8 idbyte_0;
-	u8 idbyte_1;
-	u8 idbyte_2;
-	u8 idbyte_3;
+	u8 idbyte[4];
 };
 
 int wcd9xxx_reg_read(struct wcd9xxx *wcd9xxx, unsigned short reg);
@@ -180,6 +178,8 @@ int wcd9xxx_get_intf_type(void);
 
 bool wcd9xxx_lock_sleep(struct wcd9xxx *wcd9xxx);
 void wcd9xxx_unlock_sleep(struct wcd9xxx *wcd9xxx);
+void wcd9xxx_nested_irq_lock(struct wcd9xxx *wcd9xxx);
+void wcd9xxx_nested_irq_unlock(struct wcd9xxx *wcd9xxx);
 enum wcd9xxx_pm_state wcd9xxx_pm_cmpxchg(struct wcd9xxx *wcd9xxx,
 				enum wcd9xxx_pm_state o,
 				enum wcd9xxx_pm_state n);

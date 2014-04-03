@@ -94,7 +94,7 @@ static const char	hcd_name [] = "ehci_hcd";
  */
 #define	EHCI_TUNE_FLS		1	/* (medium) 512-frame schedule */
 
-#define EHCI_IAA_MSECS		10		/* arbitrary */
+#define EHCI_IAA_MSECS		100		/* arbitrary */
 #define EHCI_IO_JIFFIES		(HZ/10)		/* io watchdog > irq_thresh */
 #define EHCI_ASYNC_JIFFIES	(HZ/20)		/* async idle timeout */
 #define EHCI_SHRINK_JIFFIES	(DIV_ROUND_UP(HZ, 200) + 1)
@@ -691,8 +691,7 @@ static int ehci_init(struct usb_hcd *hcd)
 	hw->hw_alt_next = QTD_NEXT(ehci, ehci->async->dummy->qtd_dma);
 
 	/* clear interrupt enables, set irq latency */
-	if (ehci->max_log2_irq_thresh)
-		log2_irq_thresh = ehci->max_log2_irq_thresh;
+	log2_irq_thresh = ehci->log2_irq_thresh;
 
 	if (log2_irq_thresh < 0 || log2_irq_thresh > 6)
 		log2_irq_thresh = 0;

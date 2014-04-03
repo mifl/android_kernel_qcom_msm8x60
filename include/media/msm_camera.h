@@ -1,4 +1,4 @@
-/* Copyright (c) 2009-2012, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2009-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -26,8 +26,7 @@
 #else
 #include <linux/time.h>
 #endif
-
-#include <linux/ion.h>
+#include <linux/msm_ion.h>
 
 #define BIT(nr)   (1UL << (nr))
 
@@ -195,37 +194,6 @@
 #define MSM_CAM_IOCTL_ISPIF_IO_CFG \
 	_IOR(MSM_CAM_IOCTL_MAGIC, 54, struct ispif_cfg_data *)
 
-#define MSM_CAM_IOCTL_STATS_REQBUF \
-	_IOR(MSM_CAM_IOCTL_MAGIC, 55, struct msm_stats_reqbuf *)
-
-#define MSM_CAM_IOCTL_STATS_ENQUEUEBUF \
-	_IOR(MSM_CAM_IOCTL_MAGIC, 56, struct msm_stats_buf_info *)
-
-#define MSM_CAM_IOCTL_STATS_FLUSH_BUFQ \
-	_IOR(MSM_CAM_IOCTL_MAGIC, 57, struct msm_stats_flush_bufq *)
-
-#define MSM_CAM_IOCTL_SET_MCTL_SDEV \
-	_IOW(MSM_CAM_IOCTL_MAGIC, 58, struct msm_mctl_set_sdev_data *)
-
-#define MSM_CAM_IOCTL_UNSET_MCTL_SDEV \
-	_IOW(MSM_CAM_IOCTL_MAGIC, 59, struct msm_mctl_set_sdev_data *)
-
-#define MSM_CAM_IOCTL_GET_INST_HANDLE \
-	_IOR(MSM_CAM_IOCTL_MAGIC, 60, uint32_t *)
-
-#define MSM_CAM_IOCTL_STATS_UNREG_BUF \
-	_IOR(MSM_CAM_IOCTL_MAGIC, 61, struct msm_stats_flush_bufq *)
-
-
-struct msm_stats_reqbuf {
-	int num_buf;		/* how many buffers requested */
-	int stats_type;	/* stats type */
-};
-
-struct msm_stats_flush_bufq {
-	int stats_type;	/* enum msm_stats_enum_type */
-};
-
 struct msm_mctl_pp_cmd {
 	int32_t  id;
 	uint16_t length;
@@ -347,7 +315,6 @@ struct msm_pp_frame {
 		struct msm_pp_frame_mp mp[MAX_PLANES];
 	};
 	int node_type;
-	uint32_t inst_handle;
 };
 
 struct msm_cam_evt_divert_frame {
@@ -472,7 +439,6 @@ struct msm_camera_cfg_cmd {
 #define CMD_AXI_CFG_ZSL 43
 #define CMD_AXI_CFG_SNAP_VPE 44
 #define CMD_AXI_CFG_SNAP_THUMB_VPE 45
-
 #define CMD_CONFIG_PING_ADDR 46
 #define CMD_CONFIG_PONG_ADDR 47
 #define CMD_CONFIG_FREE_BUF_ADDR 48
@@ -480,14 +446,6 @@ struct msm_camera_cfg_cmd {
 #define CMD_AXI_CFG_VIDEO_ALL_CHNLS 50
 #define CMD_VFE_BUFFER_RELEASE 51
 #define CMD_VFE_PROCESS_IRQ 52
-#define CMD_STATS_BG_ENABLE 53
-#define CMD_STATS_BF_ENABLE 54
-#define CMD_STATS_BHIST_ENABLE 55
-#define CMD_STATS_BG_BUF_RELEASE 56
-#define CMD_STATS_BF_BUF_RELEASE 57
-#define CMD_STATS_BHIST_BUF_RELEASE 58
-#define CMD_VFE_SOF_COUNT_UPDATE 59
-#define CMD_VFE_COUNT_SOF_ENABLE 60
 
 #define CMD_AXI_CFG_PRIM               BIT(8)
 #define CMD_AXI_CFG_PRIM_ALL_CHNLS     BIT(9)
@@ -495,18 +453,6 @@ struct msm_camera_cfg_cmd {
 #define CMD_AXI_CFG_SEC_ALL_CHNLS      BIT(11)
 #define CMD_AXI_CFG_TERT1              BIT(12)
 #define CMD_AXI_CFG_TERT2              BIT(13)
-
-#define CMD_AXI_START  0xE1
-#define CMD_AXI_STOP   0xE2
-#define CMD_AXI_RESET  0xE3
-
-
-#define AXI_CMD_PREVIEW      BIT(0)
-#define AXI_CMD_CAPTURE      BIT(1)
-#define AXI_CMD_RECORD       BIT(2)
-#define AXI_CMD_ZSL          BIT(3)
-#define AXI_CMD_RAW_CAPTURE  BIT(4)
-#define AXI_CMD_LIVESHOT     BIT(5)
 
 /* vfe config command: config command(from config thread)*/
 struct msm_vfe_cfg_cmd {
@@ -546,10 +492,7 @@ struct camera_enable_cmd {
 #define MSM_PMEM_C2D			17
 #define MSM_PMEM_MAINIMG_VPE    18
 #define MSM_PMEM_THUMBNAIL_VPE  19
-#define MSM_PMEM_BAYER_GRID		20
-#define MSM_PMEM_BAYER_FOCUS	21
-#define MSM_PMEM_BAYER_HIST		22
-#define MSM_PMEM_MAX            23
+#define MSM_PMEM_MAX            20
 
 #define STAT_AEAW			0
 #define STAT_AEC			1
@@ -559,10 +502,7 @@ struct camera_enable_cmd {
 #define STAT_CS				5
 #define STAT_IHIST			6
 #define STAT_SKIN			7
-#define STAT_BG				8
-#define STAT_BF				9
-#define STAT_BHIST			10
-#define STAT_MAX			11
+#define STAT_MAX			8
 
 #define FRAME_PREVIEW_OUTPUT1		0
 #define FRAME_PREVIEW_OUTPUT2		1
@@ -570,36 +510,6 @@ struct camera_enable_cmd {
 #define FRAME_THUMBNAIL			3
 #define FRAME_RAW_SNAPSHOT		4
 #define FRAME_MAX			5
-
-enum msm_stats_enum_type {
-	MSM_STATS_TYPE_AEC, /* legacy based AEC */
-	MSM_STATS_TYPE_AF,  /* legacy based AF */
-	MSM_STATS_TYPE_AWB, /* legacy based AWB */
-	MSM_STATS_TYPE_RS,  /* legacy based RS */
-	MSM_STATS_TYPE_CS,  /* legacy based CS */
-	MSM_STATS_TYPE_IHIST,   /* legacy based HIST */
-	MSM_STATS_TYPE_SKIN,    /* legacy based SKIN */
-	MSM_STATS_TYPE_BG,  /* Bayer Grids */
-	MSM_STATS_TYPE_BF,  /* Bayer Focus */
-	MSM_STATS_TYPE_BHIST,   /* Bayer Hist */
-	MSM_STATS_TYPE_AE_AW,   /* legacy stats for vfe 2.x*/
-	MSM_STATS_TYPE_MAX  /* MAX */
-};
-
-struct msm_stats_buf_info {
-	int type; /* msm_stats_enum_type */
-	int fd;
-	void *vaddr;
-	uint32_t offset;
-	uint32_t len;
-	uint32_t y_off;
-	uint32_t cbcr_off;
-	uint32_t planar0_off;
-	uint32_t planar1_off;
-	uint32_t planar2_off;
-	uint8_t active;
-	int buf_idx;
-};
 
 struct msm_pmem_info {
 	int type;
@@ -764,7 +674,6 @@ struct msm_stats_buf {
 	int length;
 	struct ion_handle *handle;
 	uint32_t frame_id;
-	int buf_idx;
 };
 #define MSM_V4L2_EXT_CAPTURE_MODE_DEFAULT 0
 /* video capture mode in VIDIOC_S_PARM */
@@ -786,19 +695,10 @@ struct msm_stats_buf {
 	(MSM_V4L2_EXT_CAPTURE_MODE_DEFAULT+7)
 #define MSM_V4L2_EXT_CAPTURE_MODE_RDI2 \
 	(MSM_V4L2_EXT_CAPTURE_MODE_DEFAULT+8)
-#define MSM_V4L2_EXT_CAPTURE_MODE_AEC \
+#define MSM_V4L2_EXT_CAPTURE_MODE_V2X_LIVESHOT \
 	(MSM_V4L2_EXT_CAPTURE_MODE_DEFAULT+9)
-#define MSM_V4L2_EXT_CAPTURE_MODE_AWB \
-	(MSM_V4L2_EXT_CAPTURE_MODE_DEFAULT+10)
-#define MSM_V4L2_EXT_CAPTURE_MODE_AF \
-	(MSM_V4L2_EXT_CAPTURE_MODE_DEFAULT+11)
-#define MSM_V4L2_EXT_CAPTURE_MODE_IHIST \
-	(MSM_V4L2_EXT_CAPTURE_MODE_DEFAULT+12)
-#define MSM_V4L2_EXT_CAPTURE_MODE_CS \
-	(MSM_V4L2_EXT_CAPTURE_MODE_DEFAULT+13)
-#define MSM_V4L2_EXT_CAPTURE_MODE_RS \
-	(MSM_V4L2_EXT_CAPTURE_MODE_DEFAULT+14)
-#define MSM_V4L2_EXT_CAPTURE_MODE_MAX (MSM_V4L2_EXT_CAPTURE_MODE_DEFAULT+15)
+#define MSM_V4L2_EXT_CAPTURE_MODE_MAX (MSM_V4L2_EXT_CAPTURE_MODE_DEFAULT+10)
+
 
 #define MSM_V4L2_PID_MOTION_ISO              V4L2_CID_PRIVATE_BASE
 #define MSM_V4L2_PID_EFFECT                 (V4L2_CID_PRIVATE_BASE+1)
@@ -816,7 +716,7 @@ struct msm_stats_buf {
 #define MSM_V4L2_PID_CTRL_CMD               (V4L2_CID_PRIVATE_BASE+13)
 #define MSM_V4L2_PID_EVT_SUB_INFO           (V4L2_CID_PRIVATE_BASE+14)
 #define MSM_V4L2_PID_STROBE_FLASH           (V4L2_CID_PRIVATE_BASE+15)
-#define MSM_V4L2_PID_INST_HANDLE            (V4L2_CID_PRIVATE_BASE+16)
+#define MSM_V4L2_PID_MMAP_ENTRY             (V4L2_CID_PRIVATE_BASE+16)
 #define MSM_V4L2_PID_MMAP_INST              (V4L2_CID_PRIVATE_BASE+17)
 #define MSM_V4L2_PID_PP_PLANE_INFO          (V4L2_CID_PRIVATE_BASE+18)
 #define MSM_V4L2_PID_MAX                    MSM_V4L2_PID_PP_PLANE_INFO
@@ -1274,31 +1174,27 @@ struct csi_lane_params_t {
 #define CSI_DECODE_10BIT 2
 #define CSI_DECODE_DPCM_10_8_10 5
 
-#define ISPIF_STREAM(intf, action, vfe) (((intf)<<ISPIF_S_STREAM_SHIFT)+\
-	(action)+((vfe)<<ISPIF_VFE_INTF_SHIFT))
-#define ISPIF_ON_FRAME_BOUNDARY   (0x01 << 0)
-#define ISPIF_OFF_FRAME_BOUNDARY  (0x01 << 1)
-#define ISPIF_OFF_IMMEDIATELY     (0x01 << 2)
-#define ISPIF_S_STREAM_SHIFT      4
-#define ISPIF_VFE_INTF_SHIFT      12
+#define ISPIF_STREAM(intf, action) (((intf)<<ISPIF_S_STREAM_SHIFT)+(action))
+#define ISPIF_ON_FRAME_BOUNDARY	(0x01 << 0)
+#define ISPIF_OFF_FRAME_BOUNDARY    (0x01 << 1)
+#define ISPIF_OFF_IMMEDIATELY       (0x01 << 2)
+#define ISPIF_S_STREAM_SHIFT	4
+
 
 #define PIX_0 (0x01 << 0)
 #define RDI_0 (0x01 << 1)
 #define PIX_1 (0x01 << 2)
 #define RDI_1 (0x01 << 3)
-#define RDI_2 (0x01 << 4)
+#define PIX_2 (0x01 << 4)
+#define RDI_2 (0x01 << 5)
 
-enum msm_ispif_vfe_intf {
-	VFE0,
-	VFE1,
-	VFE_MAX,
-};
 
 enum msm_ispif_intftype {
 	PIX0,
 	RDI0,
 	PIX1,
 	RDI1,
+	PIX2,
 	RDI2,
 	INTF_MAX,
 };
@@ -1333,7 +1229,6 @@ struct msm_ispif_params {
 	uint8_t intftype;
 	uint16_t cid_mask;
 	uint8_t csid;
-	uint8_t vfe_intf;
 };
 
 struct msm_ispif_params_list {
@@ -1677,290 +1572,33 @@ struct img_plane_info {
 	uint8_t num_planes;
 	struct plane_data plane[MAX_PLANES];
 	uint32_t sp_y_offset;
-	uint32_t inst_handle;
+	uint8_t vpe_can_use;
 };
 
 #define QCAMERA_NAME "qcamera"
-#define QCAMERA_SERVER_NAME "qcamera_server"
 #define QCAMERA_DEVICE_GROUP_ID 1
 #define QCAMERA_VNODE_GROUP_ID 2
 
-enum msm_cam_subdev_type {
-	CSIPHY_DEV,
-	CSID_DEV,
-	CSIC_DEV,
-	ISPIF_DEV,
-	VFE_DEV,
-	AXI_DEV,
-	VPE_DEV,
-	SENSOR_DEV,
-	ACTUATOR_DEV,
-	EEPROM_DEV,
-	GESTURE_DEV,
-	IRQ_ROUTER_DEV,
-	CPP_DEV,
-	CCI_DEV,
-};
-
-struct msm_mctl_set_sdev_data {
-	uint32_t revision;
-	enum msm_cam_subdev_type sdev_type;
-};
-
 #define MSM_CAM_V4L2_IOCTL_GET_CAMERA_INFO \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 1, struct msm_camera_v4l2_ioctl_t)
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 1, struct msm_camera_v4l2_ioctl_t *)
 
 #define MSM_CAM_V4L2_IOCTL_GET_CONFIG_INFO \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 2, struct msm_camera_v4l2_ioctl_t)
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 2, struct msm_camera_v4l2_ioctl_t *)
 
 #define MSM_CAM_V4L2_IOCTL_GET_MCTL_INFO \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 3, struct msm_camera_v4l2_ioctl_t)
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 3, struct msm_camera_v4l2_ioctl_t *)
 
 #define MSM_CAM_V4L2_IOCTL_CTRL_CMD_DONE \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 4, struct msm_camera_v4l2_ioctl_t)
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 4, struct msm_camera_v4l2_ioctl_t *)
 
 #define MSM_CAM_V4L2_IOCTL_GET_EVENT_PAYLOAD \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 5, struct msm_camera_v4l2_ioctl_t)
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 5, struct msm_camera_v4l2_ioctl_t *)
 
 #define MSM_CAM_IOCTL_SEND_EVENT \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 6, struct v4l2_event)
 
-#define MSM_CAM_V4L2_IOCTL_CFG_VPE \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 7, struct msm_vpe_cfg_cmd)
-
-#define MSM_CAM_V4L2_IOCTL_PRIVATE_S_CTRL \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 8, struct msm_camera_v4l2_ioctl_t)
-
-#define MSM_CAM_V4L2_IOCTL_PRIVATE_G_CTRL \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 9, struct msm_camera_v4l2_ioctl_t)
-
-#define VIDIOC_MSM_VPE_INIT \
-	_IO('V', BASE_VIDIOC_PRIVATE + 15)
-
-#define VIDIOC_MSM_VPE_RELEASE \
-	_IO('V', BASE_VIDIOC_PRIVATE + 16)
-
-#define VIDIOC_MSM_VPE_CFG \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 17, struct msm_mctl_pp_params *)
-
-#define VIDIOC_MSM_AXI_INIT \
-	_IO('V', BASE_VIDIOC_PRIVATE + 18)
-
-#define VIDIOC_MSM_AXI_RELEASE \
-	_IO('V', BASE_VIDIOC_PRIVATE + 19)
-
-#define VIDIOC_MSM_AXI_CFG \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 20, void *)
-
-#define VIDIOC_MSM_AXI_IRQ \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 21, void *)
-
-#define VIDIOC_MSM_AXI_BUF_CFG \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 22, void *)
-
-#define VIDIOC_MSM_VFE_INIT \
-	_IO('V', BASE_VIDIOC_PRIVATE + 22)
-
-#define VIDIOC_MSM_VFE_RELEASE \
-	_IO('V', BASE_VIDIOC_PRIVATE + 23)
-
 struct msm_camera_v4l2_ioctl_t {
-	uint32_t id;
 	void __user *ioctl_ptr;
-	uint32_t len;
 };
-
-struct msm_camera_vfe_params_t {
-	uint32_t operation_mode;
-	uint32_t capture_count;
-	uint32_t skip_abort;
-	uint16_t port_info;
-	uint32_t inst_handle;
-	uint16_t cmd_type;
-};
-
-enum msm_camss_irq_idx {
-	CAMERA_SS_IRQ_0,
-	CAMERA_SS_IRQ_1,
-	CAMERA_SS_IRQ_2,
-	CAMERA_SS_IRQ_3,
-	CAMERA_SS_IRQ_4,
-	CAMERA_SS_IRQ_5,
-	CAMERA_SS_IRQ_6,
-	CAMERA_SS_IRQ_7,
-	CAMERA_SS_IRQ_8,
-	CAMERA_SS_IRQ_9,
-	CAMERA_SS_IRQ_10,
-	CAMERA_SS_IRQ_11,
-	CAMERA_SS_IRQ_12,
-	CAMERA_SS_IRQ_MAX
-};
-
-enum msm_cam_hw_idx {
-	MSM_CAM_HW_MICRO,
-	MSM_CAM_HW_CCI,
-	MSM_CAM_HW_CSI0,
-	MSM_CAM_HW_CSI1,
-	MSM_CAM_HW_CSI2,
-	MSM_CAM_HW_CSI3,
-	MSM_CAM_HW_ISPIF,
-	MSM_CAM_HW_CPP,
-	MSM_CAM_HW_VFE0,
-	MSM_CAM_HW_VFE1,
-	MSM_CAM_HW_JPEG0,
-	MSM_CAM_HW_JPEG1,
-	MSM_CAM_HW_JPEG2,
-	MSM_CAM_HW_MAX
-};
-
-struct msm_camera_irq_cfg {
-	/* Bit mask of all the camera hardwares that needs to
-	 * be composited into a single IRQ to the MSM.
-	 * Current usage: (may be updated based on hw changes)
-	 * Bits 31:13 - Reserved.
-	 * Bits 12:0
-	 * 12 - MSM_CAM_HW_JPEG2
-	 * 11 - MSM_CAM_HW_JPEG1
-	 * 10 - MSM_CAM_HW_JPEG0
-	 *  9 - MSM_CAM_HW_VFE1
-	 *  8 - MSM_CAM_HW_VFE0
-	 *  7 - MSM_CAM_HW_CPP
-	 *  6 - MSM_CAM_HW_ISPIF
-	 *  5 - MSM_CAM_HW_CSI3
-	 *  4 - MSM_CAM_HW_CSI2
-	 *  3 - MSM_CAM_HW_CSI1
-	 *  2 - MSM_CAM_HW_CSI0
-	 *  1 - MSM_CAM_HW_CCI
-	 *  0 - MSM_CAM_HW_MICRO
-	 */
-	uint32_t cam_hw_mask;
-	uint8_t  irq_idx;
-	uint8_t  num_hwcore;
-};
-
-#define MSM_IRQROUTER_CFG_COMPIRQ \
-	_IOWR('V', BASE_VIDIOC_PRIVATE, void __user *)
-
-#define MAX_NUM_CPP_STRIPS 8
-
-enum msm_cpp_frame_type {
-	MSM_CPP_OFFLINE_FRAME,
-	MSM_CPP_REALTIME_FRAME,
-};
-
-struct msm_cpp_frame_strip_info {
-	int scale_v_en;
-	int scale_h_en;
-
-	int upscale_v_en;
-	int upscale_h_en;
-
-	int src_start_x;
-	int src_end_x;
-	int src_start_y;
-	int src_end_y;
-
-	/* Padding is required for upscaler because it does not
-	 * pad internally like other blocks, also needed for rotation
-	 * rotation expects all the blocks in the stripe to be the same size
-	 * Padding is done such that all the extra padded pixels
-	 * are on the right and bottom
-	*/
-	int pad_bottom;
-	int pad_top;
-	int pad_right;
-	int pad_left;
-
-	int v_init_phase;
-	int h_init_phase;
-	int h_phase_step;
-	int v_phase_step;
-
-	int prescale_crop_width_first_pixel;
-	int prescale_crop_width_last_pixel;
-	int prescale_crop_height_first_line;
-	int prescale_crop_height_last_line;
-
-	int postscale_crop_height_first_line;
-	int postscale_crop_height_last_line;
-	int postscale_crop_width_first_pixel;
-	int postscale_crop_width_last_pixel;
-
-	int dst_start_x;
-	int dst_end_x;
-	int dst_start_y;
-	int dst_end_y;
-
-	int bytes_per_pixel;
-	unsigned int source_address;
-	unsigned int destination_address;
-	unsigned int src_stride;
-	unsigned int dst_stride;
-	int rotate_270;
-	int horizontal_flip;
-	int vertical_flip;
-	int scale_output_width;
-	int scale_output_height;
-};
-
-struct msm_cpp_frame_info_t {
-	int32_t frame_id;
-	uint32_t inst_id;
-	uint32_t client_id;
-	enum msm_cpp_frame_type frame_type;
-	uint32_t num_strips;
-	struct msm_cpp_frame_strip_info *strip_info;
-};
-
-struct msm_ver_num_info {
-	uint32_t main;
-	uint32_t minor;
-	uint32_t rev;
-};
-
-#define VIDIOC_MSM_CPP_CFG \
-	_IOWR('V', BASE_VIDIOC_PRIVATE, struct msm_camera_v4l2_ioctl_t)
-
-#define VIDIOC_MSM_CPP_GET_EVENTPAYLOAD \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 1, struct msm_camera_v4l2_ioctl_t)
-
-#define VIDIOC_MSM_CPP_GET_INST_INFO \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 2, struct msm_camera_v4l2_ioctl_t)
-
-#define V4L2_EVENT_CPP_FRAME_DONE  (V4L2_EVENT_PRIVATE_START + 0)
-
-/* Instance Handle - inst_handle
- * Data bundle containing the information about where
- * to get a buffer for a particular camera instance.
- * This is a bitmask containing the following data:
- * Buffer Handle Bitmask:
- *      ------------------------------------
- *      Bits    :  Purpose
- *      ------------------------------------
- *      31 - 24 :  Reserved.
- *      23      :  is Image mode valid?
- *      22 - 16 :  Image mode.
- *      15      :  is MCTL PP inst idx valid?
- *      14 - 8  :  MCTL PP inst idx.
- *      7       :  is Video inst idx valid?
- *      6 - 0   :  Video inst idx.
- */
-#define CLR_IMG_MODE(handle)	(handle &= 0xFF00FFFF)
-#define SET_IMG_MODE(handle, data)	\
-	(handle |= ((0x1 << 23) | ((data & 0x7F) << 16)))
-#define GET_IMG_MODE(handle)	\
-	((handle & 0x800000) ? ((handle & 0x7F0000) >> 16) : 0xFF)
-
-#define CLR_MCTLPP_INST_IDX(handle)	(handle &= 0xFFFF00FF)
-#define SET_MCTLPP_INST_IDX(handle, data)	\
-	(handle |= ((0x1 << 15) | ((data & 0x7F) << 8)))
-#define GET_MCTLPP_INST_IDX(handle)	\
-	((handle & 0x8000) ? ((handle & 0x7F00) >> 8) : 0xFF)
-
-#define CLR_VIDEO_INST_IDX(handle)	(handle &= 0xFFFFFF00)
-#define GET_VIDEO_INST_IDX(handle)	\
-	((handle & 0x80) ? (handle & 0x7F) : 0xFF)
-#define SET_VIDEO_INST_IDX(handle, data)	\
-	(handle |= (0x1 << 7) | (data & 0x7F))
 
 #endif /* __LINUX_MSM_CAMERA_H */

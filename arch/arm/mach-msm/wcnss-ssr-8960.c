@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -30,8 +30,6 @@
 
 #define MODULE_NAME			"wcnss_8960"
 #define MAX_BUF_SIZE			0x51
-
-
 
 static struct delayed_work cancel_vote_work;
 static void *riva_ramdump_dev;
@@ -144,6 +142,8 @@ static int riva_powerup(const struct subsys_desc *subsys)
 	struct wcnss_wlan_config *pwlanconfig = wcnss_get_wlan_config();
 	int    ret = -1;
 
+	wcnss_ssr_boot_notify();
+
 	if (pdev && pwlanconfig)
 		ret = wcnss_wlan_power(&pdev->dev, pwlanconfig,
 					WCNSS_WLAN_SWITCH_ON);
@@ -161,9 +161,12 @@ static int riva_powerup(const struct subsys_desc *subsys)
 	return ret;
 }
 
-/* 5MB RAM segments for Riva SS */
-static struct ramdump_segment riva_segments[] = {{0x8f200000,
-						0x8f700000 - 0x8f200000} };
+/* 7MB RAM segments for Riva SS;
+ * Riva 1.1 0x8f000000 - 0x8f700000
+ * Riva 1.0 0x8f200000 - 0x8f700000
+ */
+static struct ramdump_segment riva_segments[] = {{0x8f000000,
+						0x8f700000 - 0x8f000000} };
 
 static int riva_ramdump(int enable, const struct subsys_desc *subsys)
 {
@@ -184,13 +187,13 @@ static void riva_crash_shutdown(const struct subsys_desc *subsys)
 		smsm_riva_reset();
 		/* give sufficient time for wcnss to finish it's error
 		 * fatal routine */
-		msleep(3000);
+		mdelay(3000);
 	}
 
 }
 
 static struct subsys_desc riva_8960 = {
-	.name = "riva",
+	.name = "wcnss",
 	.shutdown = riva_shutdown,
 	.powerup = riva_powerup,
 	.ramdump = riva_ramdump,
@@ -234,7 +237,7 @@ static int __init riva_ssr_module_init(void)
 		goto out;
 	}
 	ret = request_irq(RIVA_APSS_WDOG_BITE_RESET_RDY_IRQ,
-			riva_wdog_bite_irq_hdlr, IRQF_TRIGGER_HIGH,
+			riva_wdog_bite_irq_hdlr, IRQF_TRIGGER_RISING,
 				"riva_wdog", NULL);
 
 	if (ret < 0) {

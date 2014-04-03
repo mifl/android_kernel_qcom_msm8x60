@@ -67,6 +67,7 @@ struct ci13xxx_qh {
 #define QH_MAX_PKT            (0x07FFUL << 16)
 #define QH_ZLT                BIT(29)
 #define QH_MULT               (0x0003UL << 30)
+#define QH_MULT_SHIFT         11
 	/* 1 */
 	u32 curr;
 	/* 2 - 8 */
@@ -75,6 +76,13 @@ struct ci13xxx_qh {
 	u32 RESERVED;
 	struct usb_ctrlrequest   setup;
 } __attribute__ ((packed));
+
+/* cache of larger request's original attributes */
+struct ci13xxx_multi_req {
+	unsigned             len;
+	unsigned             actual;
+	void                *buf;
+};
 
 /* Extension of usb_request */
 struct ci13xxx_req {
@@ -85,6 +93,7 @@ struct ci13xxx_req {
 	dma_addr_t           dma;
 	struct ci13xxx_td   *zptr;
 	dma_addr_t           zdma;
+	struct ci13xxx_multi_req multi;
 };
 
 /* Extension of usb_ep */
@@ -107,6 +116,11 @@ struct ci13xxx_ep {
 	struct device                         *device;
 	struct dma_pool                       *td_pool;
 	unsigned long dTD_update_fail_count;
+	unsigned long			      prime_fail_count;
+	int				      prime_timer_count;
+	struct timer_list		      prime_timer;
+
+	bool                                  multi_req;
 };
 
 struct ci13xxx;
@@ -156,6 +170,9 @@ struct ci13xxx {
 	int                        softconnect; /* is pull-up enable allowed */
 	unsigned long dTD_update_fail_count;
 	struct usb_phy            *transceiver; /* Transceiver struct */
+	bool                      skip_flush; /* skip flushing remaining EP
+						upon flush timeout for the
+						first EP. */
 };
 
 struct ci13xxx_platform_data {

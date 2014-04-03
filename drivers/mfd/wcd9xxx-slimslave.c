@@ -1,4 +1,4 @@
-/* Copyright (c) 2012, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -299,7 +299,30 @@ int wcd9xxx_cfg_slim_sch_rx(struct wcd9xxx *wcd9xxx, unsigned int *ch_num,
 
 	/* Configure slave interface device */
 	pr_debug("%s: ch_cnt[%d] rate=%d\n", __func__, ch_cnt, rate);
-
+	/* Calculate the payload for shared channels */
+	for (i = 0; i < ch_cnt; i++) {
+		slave_port_id = (ch_num[i] - BASE_CH_NUM - sh_ch.rx_port_start_offset);
+		if ((slave_port_id > sh_ch.num_rx_slave_port)) {
+			pr_err("Slimbus: invalid slave port id: %d",
+			       slave_port_id);
+			ret = -EINVAL;
+			goto err;
+		}
+		slave_port_id += sh_ch.rx_port_start_offset;
+		/* look for the valid port range and calculate the
+		 * payload accordingly
+		 */
+		if ((slave_port_id > sh_ch.pgd_tx_port_ch_1_end_port_id) &&
+		    (slave_port_id <= sh_ch.port_ch_0_end_port_id)) {
+			payload_rx = payload_rx |
+				(1 << (slave_port_id -
+				      sh_ch.port_ch_0_start_port_id));
+		} else {
+			ret = -EINVAL;
+			goto err;
+		}
+	}
+	/* Set Payload and Watermark for channels */
 	for (i = 0; i < ch_cnt; i++) {
 		idx = (ch_num[i] - BASE_CH_NUM - sh_ch.rx_port_start_offset);
 		ch_h[i] = rx[idx].ch_h;
@@ -315,26 +338,13 @@ int wcd9xxx_cfg_slim_sch_rx(struct wcd9xxx *wcd9xxx, unsigned int *ch_num,
 		}
 		slave_port_id += sh_ch.rx_port_start_offset;
 		pr_debug("%s: slave_port_id %d\n", __func__, slave_port_id);
-		/* look for the valid port range and chose the
-		 * payload accordingly
-		 */
-		if ((slave_port_id > sh_ch.pgd_tx_port_ch_1_end_port_id) &&
-		    (slave_port_id <= sh_ch.port_ch_0_end_port_id)) {
-			payload_rx = payload_rx |
-				(1 << (slave_port_id -
-				      sh_ch.port_ch_0_start_port_id));
-		} else {
-			ret = -EINVAL;
-			goto err;
-		}
 
 		multi_chan_cfg_reg_addr =
 		    SB_PGD_RX_PORT_MULTI_CHANNEL_0(sh_ch.rx_port_ch_reg_base,
 						   idx);
-		pr_debug("%s: multi_chan_cfg_reg_addr 0x%x\n", __func__,
-			 multi_chan_cfg_reg_addr);
-
-		/* write to interface device */
+		pr_debug("%s: multi_chan_cfg_reg_addr 0x%x\t payload 0x%x\n",
+			 __func__, multi_chan_cfg_reg_addr, payload_rx);
+		/* write payload to interface device */
 		ret = wcd9xxx_interface_reg_write(wcd9xxx,
 						  multi_chan_cfg_reg_addr,
 						  payload_rx);
@@ -418,21 +428,17 @@ int wcd9xxx_cfg_slim_sch_tx(struct wcd9xxx *wcd9xxx, unsigned int *ch_num,
 	struct slim_ch prop;
 
 	pr_debug("%s: ch_cnt[%d] rate[%d]\n", __func__, ch_cnt, rate);
+	/* Calculate the payload for shared channels */
 	for (i = 0; i < ch_cnt; i++) {
-		idx = (ch_num[i] - BASE_CH_NUM);
-		ch_h[i] = tx[idx].ch_h;
-		sph[i] = tx[idx].sph;
-		slave_port_id = idx;
-		pr_debug("%s: idx %d, ch_h %d, sph %d, slave_port_id %d\n",
-			 __func__, idx, ch_h[i], sph[i], slave_port_id);
+		slave_port_id = (ch_num[i] - BASE_CH_NUM);
 		if (slave_port_id > sh_ch.number_of_tx_slave_dev_ports) {
 			pr_err("SLIMbus: invalid slave port id: %d",
 			       slave_port_id);
 			ret = -EINVAL;
 			goto err;
 		}
-		/* look for the valid port range and chose the
-		 *  payload accordingly
+		/* look for the valid port range and calculate the
+		 * payload accordingly
 		 */
 		if (slave_port_id <=
 		    SB_PGD_TX_PORT_MULTI_CHANNEL_0_END_PORT_ID) {
@@ -448,11 +454,26 @@ int wcd9xxx_cfg_slim_sch_tx(struct wcd9xxx *wcd9xxx, unsigned int *ch_num,
 			ret = -EINVAL;
 			goto err;
 		}
+	}
+	/* Set Payload and Watermark for channels */
+	for (i = 0; i < ch_cnt; i++) {
+		idx = (ch_num[i] - BASE_CH_NUM);
+		ch_h[i] = tx[idx].ch_h;
+		sph[i] = tx[idx].sph;
+		slave_port_id = idx;
+		pr_debug("%s: idx %d, ch_h %d, sph %d, slave_port_id %d\n",
+			 __func__, idx, ch_h[i], sph[i], slave_port_id);
+		if (slave_port_id > sh_ch.number_of_tx_slave_dev_ports) {
+			pr_err("SLIMbus: invalid slave port id: %d",
+			       slave_port_id);
+			ret = -EINVAL;
+			goto err;
+		}
 		multi_chan_cfg_reg_addr =
 		    SB_PGD_TX_PORT_MULTI_CHANNEL_0(slave_port_id);
-		pr_debug("%s: multi_chan_cfg_reg_addr 0x%x\n", __func__,
-			 multi_chan_cfg_reg_addr);
-		/* write to interface device */
+		pr_debug("%s: multi_chan_cfg_reg_addr 0x%x\t payload 0x%x\n",
+			 __func__, multi_chan_cfg_reg_addr, payload_tx_0);
+		/* write payload to interface device */
 		ret = wcd9xxx_interface_reg_write(wcd9xxx,
 				multi_chan_cfg_reg_addr,
 				payload_tx_0);
@@ -464,6 +485,8 @@ int wcd9xxx_cfg_slim_sch_tx(struct wcd9xxx *wcd9xxx, unsigned int *ch_num,
 		}
 		multi_chan_cfg_reg_addr =
 		    SB_PGD_TX_PORT_MULTI_CHANNEL_1(slave_port_id);
+		pr_debug("%s: multi_chan_cfg_reg_addr 0x%x\t payload 0x%x\n",
+			 __func__, multi_chan_cfg_reg_addr, payload_tx_1);
 		/* ports 8,9 */
 		ret = wcd9xxx_interface_reg_write(wcd9xxx,
 						  multi_chan_cfg_reg_addr,
@@ -535,7 +558,6 @@ int wcd9xxx_close_slim_sch_rx(struct wcd9xxx *wcd9xxx, unsigned int *ch_num,
 				unsigned int ch_cnt)
 {
 	u16 grph = 0;
-	u32 sph[SLIM_MAX_RX_PORTS] = {0};
 	int i = 0 , idx = 0;
 	int ret = 0;
 	struct wcd9xxx_slim_sch_rx *rx = sh_ch.rx;
@@ -549,10 +571,9 @@ int wcd9xxx_close_slim_sch_rx(struct wcd9xxx *wcd9xxx, unsigned int *ch_num,
 			ret = -EINVAL;
 			goto err;
 		}
-		sph[i] = rx[idx].sph;
 		grph = rx[idx].grph;
-		pr_debug("%s: ch_num[%d] %d, idx %d, sph[%d] %x, grph %x\n",
-			 __func__, i, ch_num[i], idx, i, sph[i], grph);
+		pr_debug("%s: ch_num[%d] %d, idx %d, grph %x\n",
+			 __func__, i, ch_num[i], idx, grph);
 	}
 
 	/* slim_control_ch (REMOVE) */
@@ -560,12 +581,6 @@ int wcd9xxx_close_slim_sch_rx(struct wcd9xxx *wcd9xxx, unsigned int *ch_num,
 	if (ret < 0) {
 		pr_err("%s: slim_control_ch failed ret[%d]\n", __func__, ret);
 		goto err;
-	}
-	/* slim_disconnect_port */
-	ret = slim_disconnect_ports(wcd9xxx->slim, sph, ch_cnt);
-	if (ret < 0) {
-		pr_err("%s: slim_disconnect_ports failed ret[%d]\n",
-			 __func__, ret);
 	}
 	for (i = 0; i < ch_cnt; i++) {
 		idx = (ch_num[i] - BASE_CH_NUM - sh_ch.rx_port_start_offset);
@@ -580,7 +595,6 @@ int wcd9xxx_close_slim_sch_tx(struct wcd9xxx *wcd9xxx, unsigned int *ch_num,
 			      unsigned int ch_cnt)
 {
 	u16 grph = 0;
-	u32 sph[SLIM_MAX_TX_PORTS] = {0};
 	int ret = 0;
 	int i = 0 , idx = 0;
 	struct wcd9xxx_slim_sch_tx *tx = sh_ch.tx;
@@ -594,14 +608,7 @@ int wcd9xxx_close_slim_sch_tx(struct wcd9xxx *wcd9xxx, unsigned int *ch_num,
 			ret = -EINVAL;
 			goto err;
 		}
-		sph[i] = tx[idx].sph;
 		grph = tx[idx].grph;
-	}
-	/* slim_disconnect_port */
-	ret = slim_disconnect_ports(wcd9xxx->slim, sph, ch_cnt);
-	if (ret < 0) {
-		pr_err("%s: slim_disconnect_ports failed ret[%d]\n",
-				__func__, ret);
 	}
 	/* slim_control_ch (REMOVE) */
 	ret = slim_control_ch(wcd9xxx->slim, grph, SLIM_CH_REMOVE, true);
@@ -633,3 +640,48 @@ int wcd9xxx_get_slave_port(unsigned int ch_num)
 	return ret;
 }
 EXPORT_SYMBOL_GPL(wcd9xxx_get_slave_port);
+
+int wcd9xxx_disconnect_port(struct wcd9xxx *wcd9xxx, unsigned int *ch_num,
+				unsigned int ch_cnt, unsigned int rx_tx)
+{
+	u32 sph[SLIM_MAX_TX_PORTS] = {0};
+	int i = 0 , idx = 0;
+	int ret = 0;
+	struct wcd9xxx_slim_sch_rx *rx = sh_ch.rx;
+	struct wcd9xxx_slim_sch_tx *tx = sh_ch.tx;
+
+	pr_debug("%s: ch_cnt[%d], rx_tx flag = %d\n", __func__, ch_cnt, rx_tx);
+	for (i = 0; i < ch_cnt; i++) {
+		/* rx_tx will be 1 for rx, 0 for tx */
+		if (rx_tx) {
+			idx = (ch_num[i] - BASE_CH_NUM -
+				sh_ch.rx_port_start_offset);
+			if (idx < 0) {
+				pr_err("%s: Invalid index found for RX = %d\n",
+					__func__, idx);
+				ret = -EINVAL;
+				goto err;
+			}
+			sph[i] = rx[idx].sph;
+		} else {
+			idx = (ch_num[i] - BASE_CH_NUM);
+			if (idx < 0) {
+				pr_err("%s:Invalid index found for TX = %d\n",
+					__func__, idx);
+				ret = -EINVAL;
+				goto err;
+			}
+			sph[i] = tx[idx].sph;
+		}
+	}
+
+	/* slim_disconnect_port */
+	ret = slim_disconnect_ports(wcd9xxx->slim, sph, ch_cnt);
+	if (ret < 0) {
+		pr_err("%s: slim_disconnect_ports failed ret[%d]\n",
+			__func__, ret);
+	}
+err:
+	return ret;
+}
+EXPORT_SYMBOL_GPL(wcd9xxx_disconnect_port);

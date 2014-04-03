@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -11,6 +11,7 @@
  *
  */
 
+#include <linux/export.h>
 #include <linux/workqueue.h>
 #include <linux/delay.h>
 #include <linux/types.h>
@@ -136,7 +137,7 @@ static int msm_pmem_table_add(struct hlist_head *ptype,
 	if (IS_ERR_OR_NULL(region->handle))
 		goto out1;
 	if (ion_map_iommu(client, region->handle, CAMERA_DOMAIN, GEN_POOL,
-				  SZ_4K, 0, &paddr, &len, UNCACHED, 0) < 0)
+				  SZ_4K, 0, &paddr, &len, ~ION_FLAG_CACHED, 0) < 0)
 		goto out2;
 #elif CONFIG_ANDROID_PMEM
 	rc = get_pmem_file(info->fd, &paddr, &kvstart, &len, &file);
@@ -208,9 +209,6 @@ static int __msm_register_pmem(struct hlist_head *ptype,
 	case MSM_PMEM_IHIST:
 	case MSM_PMEM_SKIN:
 	case MSM_PMEM_AEC_AWB:
-	case MSM_PMEM_BAYER_GRID:
-	case MSM_PMEM_BAYER_FOCUS:
-	case MSM_PMEM_BAYER_HIST:
 		rc = msm_pmem_table_add(ptype, pinfo, client);
 		break;
 
@@ -238,9 +236,6 @@ static int __msm_pmem_table_del(struct hlist_head *ptype,
 	case MSM_PMEM_IHIST:
 	case MSM_PMEM_SKIN:
 	case MSM_PMEM_AEC_AWB:
-	case MSM_PMEM_BAYER_GRID:
-	case MSM_PMEM_BAYER_FOCUS:
-	case MSM_PMEM_BAYER_HIST:
 		hlist_for_each_entry_safe(region, node, n,
 				ptype, list) {
 
@@ -405,7 +400,7 @@ int msm_register_pmem(struct hlist_head *ptype, void __user *arg,
 
 	return __msm_register_pmem(ptype, &info, client);
 }
-//EXPORT_SYMBOL(msm_register_pmem);
+EXPORT_SYMBOL(msm_register_pmem);
 
 int msm_pmem_table_del(struct hlist_head *ptype, void __user *arg,
 					   struct ion_client *client)
@@ -419,4 +414,4 @@ int msm_pmem_table_del(struct hlist_head *ptype, void __user *arg,
 
 	return __msm_pmem_table_del(ptype, &info, client);
 }
-//EXPORT_SYMBOL(msm_pmem_table_del);
+EXPORT_SYMBOL(msm_pmem_table_del);

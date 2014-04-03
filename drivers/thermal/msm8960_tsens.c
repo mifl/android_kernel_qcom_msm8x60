@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -64,7 +64,7 @@ enum tsens_trip_type {
 #define TSENS_UPPER_STATUS_CLR		BIT((tsens_status_cntl_start + 2))
 #define TSENS_MAX_STATUS_MASK		BIT((tsens_status_cntl_start + 3))
 
-#define TSENS_MEASURE_PERIOD				4 /* 1 sec. default */
+#define TSENS_MEASURE_PERIOD				1
 #define TSENS_8960_SLP_CLK_ENA				BIT(26)
 
 #define TSENS_THRESHOLD_ADDR		(MSM_CLK_CTL_BASE + 0x00003624)
@@ -159,6 +159,7 @@ struct tsens_tm_device {
 	enum platform_type		hw_type;
 	int				pm_tsens_thr_data;
 	int				pm_tsens_cntl;
+	struct work_struct		tsens_work;
 	struct tsens_tm_device_sensor	sensor[0];
 };
 
@@ -610,9 +611,10 @@ static void notify_uspace_tsens_fn(struct work_struct *work)
 					NULL, "type");
 }
 
-static irqreturn_t tsens_isr(int irq, void *data)
+static void tsens_scheduler_fn(struct work_struct *work)
 {
-	struct tsens_tm_device *tm = data;
+	struct tsens_tm_device *tm = container_of(work, struct tsens_tm_device,
+					tsens_work);
 	unsigned int threshold, threshold_low, i, code, reg, sensor, mask;
 	unsigned int sensor_addr;
 	bool upper_th_x, lower_th_x;
@@ -627,6 +629,7 @@ static irqreturn_t tsens_isr(int irq, void *data)
 		writel_relaxed(reg | TSENS_LOWER_STATUS_CLR |
 			TSENS_UPPER_STATUS_CLR, TSENS_CNTL_ADDR);
 	}
+
 	mask = ~(TSENS_LOWER_STATUS_CLR | TSENS_UPPER_STATUS_CLR);
 	threshold = readl_relaxed(TSENS_THRESHOLD_ADDR);
 	threshold_low = (threshold & TSENS_THRESHOLD_LOWER_LIMIT_MASK)
@@ -658,9 +661,7 @@ static irqreturn_t tsens_isr(int irq, void *data)
 				/* Notify user space */
 				schedule_work(&tm->sensor[i].work);
 				adc_code = readl_relaxed(sensor_addr);
-				pr_info("\nTrip point triggered by "
-					"current temperature (%d degrees) "
-					"measured by Temperature-Sensor %d\n",
+				pr_debug("Trigger (%d degrees) for sensor %d\n",
 					tsens_tz_code_to_degC(adc_code, i), i);
 			}
 		}
@@ -672,21 +673,13 @@ static irqreturn_t tsens_isr(int irq, void *data)
 	else
 	writel_relaxed(reg & mask, TSENS_CNTL_ADDR);
 	mb();
-	return IRQ_HANDLED;
 }
 
-static void tsens8960_sensor_mode_init(void)
+static irqreturn_t tsens_isr(int irq, void *data)
 {
-	unsigned int reg_cntl = 0;
+	schedule_work(&tmdev->tsens_work);
 
-	reg_cntl = readl_relaxed(TSENS_CNTL_ADDR);
-	if (tmdev->hw_type == MSM_8960 || tmdev->hw_type == MDM_9615 ||
-			tmdev->hw_type == APQ_8064) {
-		writel_relaxed(reg_cntl &
-				~((((1 << tmdev->tsens_num_sensor) - 1) >> 1)
-				<< (TSENS_SENSOR0_SHIFT + 1)), TSENS_CNTL_ADDR);
-		tmdev->sensor[TSENS_MAIN_SENSOR].mode = THERMAL_DEVICE_ENABLED;
-	}
+	return IRQ_HANDLED;
 }
 
 #ifdef CONFIG_PM
@@ -869,8 +862,7 @@ static int tsens_calib_sensors8660(void)
 			tmdev->sensor[TSENS_MAIN_SENSOR].calib_data =
 			tmdev->sensor[TSENS_MAIN_SENSOR].calib_data_backup;
 	if (!tmdev->sensor[TSENS_MAIN_SENSOR].calib_data) {
-		pr_err("%s: No temperature sensor data for calibration"
-				" in QFPROM!\n", __func__);
+		pr_err("QFPROM TSENS calibration data not present\n");
 		return -ENODEV;
 	}
 
@@ -901,8 +893,7 @@ static int tsens_calib_sensors8960(void)
 			tmdev->sensor[i].calib_data =
 				tmdev->sensor[i].calib_data_backup;
 		if (!tmdev->sensor[i].calib_data) {
-			WARN(1, "%s: No temperature sensor:%d data for"
-			" calibration in QFPROM!\n", __func__, i);
+			pr_err("QFPROM TSENS calibration data not present\n");
 			return -ENODEV;
 		}
 		tmdev->sensor[i].offset = (TSENS_CAL_DEGC *
@@ -914,17 +905,6 @@ static int tsens_calib_sensors8960(void)
 	}
 
 	return 0;
-}
-
-static int tsens_check_version_support(void)
-{
-	int rc = 0;
-
-	if (tmdev->hw_type == MSM_8960)
-		if (SOCINFO_VERSION_MAJOR(socinfo_get_version()) == 1)
-			rc = -ENODEV;
-
-	return rc;
 }
 
 static int tsens_calib_sensors(void)
@@ -963,13 +943,6 @@ int msm_tsens_early_init(struct tsens_platform_data *pdata)
 	tmdev->tsens_factor = pdata->tsens_factor;
 	tmdev->tsens_num_sensor = pdata->tsens_num_sensor;
 	tmdev->hw_type = pdata->hw_type;
-
-	rc = tsens_check_version_support();
-	if (rc < 0) {
-		kfree(tmdev);
-		tmdev = NULL;
-		return rc;
-	}
 
 	rc = tsens_calib_sensors();
 	if (rc < 0) {
@@ -1013,10 +986,7 @@ static int __devinit tsens_tm_probe(struct platform_device *pdev)
 			rc = -ENODEV;
 			goto fail;
 		}
-		tmdev->sensor[i].mode = THERMAL_DEVICE_DISABLED;
 	}
-
-	tsens8960_sensor_mode_init();
 
 	rc = request_irq(TSENS_UPPER_LOWER_INT, tsens_isr,
 		IRQF_TRIGGER_RISING, "tsens_interrupt", tmdev);
@@ -1026,6 +996,7 @@ static int __devinit tsens_tm_probe(struct platform_device *pdev)
 			thermal_zone_device_unregister(tmdev->sensor[i].tz_dev);
 		goto fail;
 	}
+	INIT_WORK(&tmdev->tsens_work, tsens_scheduler_fn);
 
 	pr_debug("%s: OK\n", __func__);
 	mb();
