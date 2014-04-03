@@ -220,7 +220,7 @@ static int msm_stats_buf_prepare(struct msm_stats_bufq_ctrl *stats_ctrl,
 	}
 	if (ion_map_iommu(client, stats_buf->handle,
 			CAMERA_DOMAIN, GEN_POOL, SZ_4K,
-			0, &paddr, &len, 0, 0) < 0) {
+			0, &paddr, &len, UNCACHED, 0) < 0) {
 		rc = -EINVAL;
 		pr_err("%s: cannot map address", __func__);
 		goto out2;
@@ -475,8 +475,6 @@ static int msm_stats_enqueue_buf(struct msm_stats_bufq_ctrl *stats_ctrl,
 	struct msm_stats_buf_info *info, struct ion_client *client)
 {
 	int rc = 0;
-	D("%s: stats type : %d, idx : %d\n", __func__,
-		info->type, info->buf_idx);
 	rc = msm_stats_buf_prepare(stats_ctrl, info, client);
 	if (rc < 0) {
 		pr_err("%s: buf_prepare failed, rc = %d", __func__, rc);

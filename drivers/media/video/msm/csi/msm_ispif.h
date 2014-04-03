@@ -22,6 +22,11 @@ struct ispif_irq_status {
 	uint32_t ispifIrqStatus1;
 };
 
+enum msm_ispif_state_t {
+	ISPIF_POWER_UP,
+	ISPIF_POWER_DOWN,
+};
+
 struct ispif_device {
 	struct platform_device *pdev;
 	struct v4l2_subdev subdev;
@@ -34,7 +39,7 @@ struct ispif_device {
 	struct completion reset_complete;
 	uint32_t csid_version;
 	struct clk *ispif_clk[5];
-	uint32_t pix_sof_count;
+	enum msm_ispif_state_t ispif_state;
 };
 
 struct ispif_isr_queue_cmd {
@@ -45,5 +50,7 @@ struct ispif_isr_queue_cmd {
 
 #define VIDIOC_MSM_ISPIF_CFG \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 18, struct ispif_cfg_data*)
+
+void msm_ispif_vfe_get_cid(uint8_t intftype, char *cids, int *num);
 
 #endif
