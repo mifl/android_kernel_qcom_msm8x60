@@ -14,6 +14,7 @@
 #include <linux/types.h>
 #include <linux/bitops.h>
 #include <linux/mutex.h>
+#include <linux/slimport.h>
 
 /* #define DEBUG */
 #define DEV_DBG_PREFIX "EXT_COMMON: "
