@@ -135,7 +135,7 @@ static struct subsys_soc_restart_order *restart_orders_8064_sglte2[] = {
 static struct subsys_soc_restart_order **restart_orders;
 static int n_restart_orders;
 
-static int restart_level = RESET_SOC;
+static int restart_level = RESET_SUBSYS_INDEPENDENT;
 
 int get_restart_level()
 {
@@ -256,10 +256,11 @@ static void do_epoch_check(struct subsys_device *dev)
 
 	if (time_first && n >= max_restarts_check) {
 		if ((curr_time->tv_sec - time_first->tv_sec) <
-				max_history_time_check)
-			panic("Subsystems have crashed %d times in less than "
+				max_history_time_check) {
+			panic("Subsystems have crashed %d times in less than "\
 				"%ld seconds!", max_restarts_check,
 				max_history_time_check);
+		}
 	}
 
 out:
@@ -295,9 +296,10 @@ static void subsystem_shutdown(struct subsys_device *dev, void *data)
 	const char *name = dev->desc->name;
 
 	pr_info("[%p]: Shutting down %s\n", current, name);
-	if (dev->desc->shutdown(dev->desc) < 0)
+	if (dev->desc->shutdown(dev->desc) < 0) {
 		panic("subsys-restart: [%p]: Failed to shutdown %s!",
 			current, name);
+	}
 }
 
 static void subsystem_ramdump(struct subsys_device *dev, void *data)
@@ -314,8 +316,9 @@ static void subsystem_powerup(struct subsys_device *dev, void *data)
 	const char *name = dev->desc->name;
 
 	pr_info("[%p]: Powering up %s\n", current, name);
-	if (dev->desc->powerup(dev->desc) < 0)
+	if (dev->desc->powerup(dev->desc) < 0) {
 		panic("[%p]: Failed to powerup %s!", current, name);
+	}
 }
 
 static void subsystem_restart_wq_func(struct work_struct *work)
@@ -367,9 +370,10 @@ static void subsystem_restart_wq_func(struct work_struct *work)
 	 * sequence for these subsystems. In the latter case, panic and bail
 	 * out, since a subsystem died in its powerup sequence.
 	 */
-	if (!mutex_trylock(powerup_lock))
+	if (!mutex_trylock(powerup_lock)) {
 		panic("%s[%p]: Subsystem died during powerup!",
 						__func__, current);
+	}
 
 	do_epoch_check(dev);
 
@@ -443,6 +447,17 @@ static void __subsystem_restart_dev(struct subsys_device *dev)
 int subsystem_restart_dev(struct subsys_device *dev)
 {
 	const char *name = dev->desc->name;
+
+	/*
+	 * If a system reboot/shutdown is underway, ignore subsystem errors.
+	 * However, print a message so that we know that a subsystem behaved
+	 * unexpectedly here.
+	 */
+	if (system_state == SYSTEM_RESTART
+		|| system_state == SYSTEM_POWER_OFF) {
+		pr_err("%s crashed during a system poweroff/shutdown.\n", name);
+		return -EBUSY;
+	}
 
 	pr_info("Restart sequence requested for %s, restart_level = %d.\n",
 		name, restart_level);
@@ -583,9 +598,11 @@ static int __init ssr_init_soc_restart_orders(void)
 
 static int __init subsys_restart_init(void)
 {
-	ssr_wq = alloc_workqueue("ssr_wq", 0, 0);
+	restart_level = RESET_SOC;
+
+	ssr_wq = alloc_workqueue("ssr_wq", WQ_CPU_INTENSIVE, 0);
 	if (!ssr_wq)
-		panic("Couldn't allocate workqueue for subsystem restart.\n");
+		panic("%s: out of memory\n", __func__);
 
 	return ssr_init_soc_restart_orders();
 }

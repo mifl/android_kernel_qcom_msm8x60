@@ -41,6 +41,7 @@
 #include <linux/mfd/pm8xxx/misc.h>
 #include <linux/power_supply.h>
 #include <linux/mhl_8334.h>
+#include <linux/slimport.h>
 
 #include <asm/mach-types.h>
 
