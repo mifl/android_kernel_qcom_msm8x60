@@ -26,8 +26,6 @@
 
 #include "adreno.h"
 #include "adreno_pm4types.h"
-#include "adreno_debugfs.h"
-#include "adreno_postmortem.h"
 
 #include "a2xx_reg.h"
 #include "a3xx_reg.h"
@@ -1154,7 +1152,7 @@ adreno_dump_and_recover(struct kgsl_device *device)
 		 * Trigger an automatic dump of the state to
 		 * the console
 		 */
-		adreno_postmortem_dump(device, 0);
+		kgsl_postmortem_dump(device, 0);
 
 		/*
 		 * Make a GPU snapshot.  For now, do it after the PM dump so we
@@ -2008,6 +2006,7 @@ static const struct kgsl_functable adreno_functable = {
 	.drawctxt_create = adreno_drawctxt_create,
 	.drawctxt_destroy = adreno_drawctxt_destroy,
 	.setproperty = adreno_setproperty,
+	.postmortem_dump = adreno_dump,
 };
 
 static struct platform_device_id adreno_id_table[] = {
