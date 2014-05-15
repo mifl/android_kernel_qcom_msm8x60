@@ -4319,6 +4319,7 @@ static int tabla_hw_params(struct snd_pcm_substream *substream,
 
 static struct snd_soc_dai_ops tabla_dai_ops = {
 	.startup = tabla_startup,
+	.shutdown = tabla_shutdown,
 	.hw_params = tabla_hw_params,
 	.set_sysclk = tabla_set_dai_sysclk,
 	.set_fmt = tabla_set_dai_fmt,
@@ -4472,8 +4473,8 @@ static int tabla_codec_enable_chmask(struct tabla_priv *tabla_p,
 			pr_err("%s: Slim close tx/rx wait timeout\n",
 				__func__);
 			ret = -EINVAL;
-		}
-		ret = 0;
+		} else
+			ret = 0;
 		break;
 	}
 	return ret;
@@ -4486,7 +4487,7 @@ static int tabla_codec_enable_slimrx(struct snd_soc_dapm_widget *w,
 	struct snd_soc_codec *codec = w->codec;
 	struct tabla_priv *tabla_p = snd_soc_codec_get_drvdata(codec);
 	u32  j = 0;
-	u32  ret = 0;
+	int  ret = 0;
 	codec->control_data = dev_get_drvdata(codec->dev->parent);
 	tabla = codec->control_data;
 
@@ -4543,13 +4544,22 @@ static int tabla_codec_enable_slimrx(struct snd_soc_dapm_widget *w,
 			ret = wcd9xxx_close_slim_sch_rx(tabla,
 						tabla_p->dai[j].ch_num,
 						tabla_p->dai[j].ch_tot);
+			ret = tabla_codec_enable_chmask(tabla_p,
+							SND_SOC_DAPM_POST_PMD,
+							j);
+			if (ret < 0) {
+				ret = wcd9xxx_disconnect_port(tabla,
+							tabla_p->dai[j].ch_num,
+							tabla_p->dai[j].ch_tot,
+							1);
+				pr_info("%s: Disconnect RX port ret = %d\n",
+					__func__, ret);
+			}
 			tabla_p->dai[j].rate = 0;
 			memset(tabla_p->dai[j].ch_num, 0, (sizeof(u32)*
 					tabla_p->dai[j].ch_tot));
 			tabla_p->dai[j].ch_tot = 0;
-			ret = tabla_codec_enable_chmask(tabla_p,
-							SND_SOC_DAPM_POST_PMD,
-							j);
+
 			if ((tabla != NULL) &&
 			    (tabla->dev != NULL) &&
 			    (tabla->dev->parent != NULL)) {
@@ -4569,7 +4579,7 @@ static int tabla_codec_enable_slimtx(struct snd_soc_dapm_widget *w,
 	struct tabla_priv *tabla_p = snd_soc_codec_get_drvdata(codec);
 	/* index to the DAI ID, for now hardcoding */
 	u32  j = 0;
-	u32  ret = 0;
+	int  ret = 0;
 
 	codec->control_data = dev_get_drvdata(codec->dev->parent);
 	tabla = codec->control_data;
@@ -4626,13 +4636,22 @@ static int tabla_codec_enable_slimtx(struct snd_soc_dapm_widget *w,
 			ret = wcd9xxx_close_slim_sch_tx(tabla,
 						tabla_p->dai[j].ch_num,
 						tabla_p->dai[j].ch_tot);
+			ret = tabla_codec_enable_chmask(tabla_p,
+						SND_SOC_DAPM_POST_PMD,
+						j);
+			if (ret < 0) {
+				ret = wcd9xxx_disconnect_port(tabla,
+						tabla_p->dai[j].ch_num,
+						tabla_p->dai[j].ch_tot, 0);
+				pr_info("%s: Disconnect TX port, ret = %d\n",
+					__func__, ret);
+			}
+
 			tabla_p->dai[j].rate = 0;
 			memset(tabla_p->dai[j].ch_num, 0, (sizeof(u32)*
 					tabla_p->dai[j].ch_tot));
 			tabla_p->dai[j].ch_tot = 0;
-			ret = tabla_codec_enable_chmask(tabla_p,
-							SND_SOC_DAPM_POST_PMD,
-							j);
+
 			if ((tabla != NULL) &&
 			    (tabla->dev != NULL) &&
 			    (tabla->dev->parent != NULL)) {
@@ -5322,6 +5341,7 @@ static int tabla_codec_enable_hs_detect(struct snd_soc_codec *codec,
 	snd_soc_update_bits(codec, tabla->mbhc_bias_regs.mbhc_reg, 0x90, 0x00);
 
 	if (insertion) {
+		pr_debug("%s: setup for insertion\n", __func__);
 		tabla_codec_switch_micbias(codec, 0);
 
 		/* DAPM can manipulate PA/DAC bits concurrently */
@@ -6319,6 +6339,9 @@ void tabla_find_plug_and_report(struct snd_soc_codec *codec,
 {
 	struct tabla_priv *tabla = snd_soc_codec_get_drvdata(codec);
 
+	pr_debug("%s: enter current_plug(%d) new_plug(%d)\n",
+		 __func__, tabla->current_plug, plug_type);
+
 	if (plug_type == PLUG_TYPE_HEADPHONE &&
 	    tabla->current_plug == PLUG_TYPE_NONE) {
 		/* Nothing was reported previously
@@ -6709,7 +6732,6 @@ static void tabla_codec_detect_plug_type(struct snd_soc_codec *codec)
 		pr_debug("%s: Headphone Detected\n", __func__);
 		tabla_codec_report_plug(codec, 1, SND_JACK_HEADPHONE);
 		tabla_codec_cleanup_hs_polling(codec);
-		tabla_codec_enable_hs_detect(codec, 0, 0, false);
 		tabla_schedule_hs_detect_plug(tabla,
 					&tabla->hs_correct_plug_work_nogpio);
 	} else if (plug_type == PLUG_TYPE_HEADSET) {
@@ -7212,6 +7234,8 @@ static void tabla_hs_correct_plug_nogpio(struct work_struct *work)
 	 */
 	tabla->mbhc_cfg.mclk_cb_fn(codec, 0, false);
 	if (!is_headset) {
+		pr_debug("%s: Inserted headphone is not a headset\n",
+			__func__);
 		tabla_turn_onoff_override(codec, false);
 		tabla_codec_cleanup_hs_polling(codec);
 		tabla_codec_enable_hs_detect(codec, 0, 0, false);

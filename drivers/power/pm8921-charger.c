@@ -270,6 +270,7 @@ struct pm8921_chg_chip {
 	int				rconn_mohm;
 	enum pm8921_chg_led_src_config	led_src_config;
 	bool				host_mode;
+	bool				has_dc_supply;
 	u8				active_path;
 	int				recent_reported_soc;
 };
@@ -819,7 +820,7 @@ static int pm_chg_tchg_max_set(struct pm8921_chg_chip *chip, int minutes)
 					 temp);
 }
 
-#define PM8921_CHG_TTRKL_MASK	0x1F
+#define PM8921_CHG_TTRKL_MASK	0x3F
 #define PM8921_CHG_TTRKL_MIN	1
 #define PM8921_CHG_TTRKL_MAX	64
 static int pm_chg_ttrkl_max_set(struct pm8921_chg_chip *chip, int minutes)
@@ -1195,6 +1196,12 @@ static int pm_power_get_property_mains(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_PRESENT:
 	case POWER_SUPPLY_PROP_ONLINE:
 		val->intval = 0;
+
+		if (the_chip->has_dc_supply) {
+			val->intval = 1;
+			return 0;
+		}
+
 		if (charging_disabled)
 			return 0;
 
@@ -1281,6 +1288,8 @@ static int pm_power_set_property_usb(struct power_supply *psy,
 		else
 			return -EINVAL;
 		break;
+	case POWER_SUPPLY_PROP_TYPE:
+		return pm8921_set_usb_power_supply_type(val->intval);
 	default:
 		return -EINVAL;
 	}
@@ -1669,8 +1678,10 @@ void pm8921_charger_vbus_draw(unsigned int mA)
 	 */
 	if (!get_prop_batt_present(the_chip)
 		&& !is_dc_chg_plugged_in(the_chip)) {
-		pr_err("rejected: no other power source connected\n");
-		return;
+		if (!the_chip->has_dc_supply) {
+			pr_err("rejected: no other power source connected\n");
+			return;
+		}
 	}
 
 	if (usb_max_current && mA > usb_max_current) {
@@ -2477,15 +2488,18 @@ static void unplug_check_worker(struct work_struct *work)
 				pm_chg_get_fsm_state(chip),
 				get_prop_batt_current(chip)
 				);
+			return;
+		} else {
+			goto check_again_later;
 		}
-		return;
 	}
 
 	if (active_path & USB_ACTIVE_BIT) {
 		reg_loop = pm_chg_get_regulation_loop(chip);
 		pr_debug("reg_loop=0x%x usb_ma = %d\n", reg_loop, usb_ma);
 		if ((reg_loop & VIN_ACTIVE_BIT) &&
-			(usb_ma > USB_WALL_THRESHOLD_MA)) {
+			(usb_ma > USB_WALL_THRESHOLD_MA)
+			&& !charging_disabled) {
 			decrease_usb_ma_value(&usb_ma);
 			usb_target_ma = usb_ma;
 			/* end AICL here */
@@ -2500,7 +2514,6 @@ static void unplug_check_worker(struct work_struct *work)
 
 	ibat = get_prop_batt_current(chip);
 	if (reg_loop & VIN_ACTIVE_BIT) {
-
 		pr_debug("ibat = %d fsm = %d reg_loop = 0x%x\n",
 				ibat, pm_chg_get_fsm_state(chip), reg_loop);
 		if (ibat > 0) {
@@ -2536,7 +2549,8 @@ static void unplug_check_worker(struct work_struct *work)
 		unplug_ovp_fet_open(chip);
 	}
 
-	if (!(reg_loop & VIN_ACTIVE_BIT) && (active_path & USB_ACTIVE_BIT)) {
+	if (!(reg_loop & VIN_ACTIVE_BIT) && (active_path & USB_ACTIVE_BIT)
+		&& !charging_disabled) {
 		/* only increase iusb_max if vin loop not active */
 		if (usb_ma < usb_target_ma) {
 			increase_usb_ma_value(&usb_ma);
@@ -2844,11 +2858,7 @@ static void adjust_vdd_max_for_fastchg(struct pm8921_chg_chip *chip)
 		pr_debug("Exiting ichg_meas_ua = %d > 0\n", ichg_meas_ua);
 		return;
 	}
-	if (ichg_meas_ua <= ichg_threshold_ua) {
-		pr_debug("Exiting ichg_meas_ua = %d < ichg_threshold_ua = %d\n",
-					ichg_meas_ua, ichg_threshold_ua);
-		return;
-	}
+
 	ichg_meas_ma = ichg_meas_ua / 1000;
 
 	/* rconn_mohm is in milliOhms */
@@ -3694,24 +3704,9 @@ static int __devinit pm8921_chg_hw_init(struct pm8921_chg_chip *chip)
 						chip->led_src_config, rc);
 	}
 
-	/* Workarounds for die 1.1 and 1.0 */
-	if (pm8xxx_get_revision(chip->dev->parent) < PM8XXX_REVISION_8921_2p0) {
-		pm8xxx_writeb(chip->dev->parent, CHG_BUCK_CTRL_TEST2, 0xF1);
-		pm8xxx_writeb(chip->dev->parent, CHG_BUCK_CTRL_TEST3, 0xCE);
-		pm8xxx_writeb(chip->dev->parent, CHG_BUCK_CTRL_TEST3, 0xD8);
-
-		/* software workaround for correct battery_id detection */
-		pm8xxx_writeb(chip->dev->parent, PSI_TXRX_SAMPLE_DATA_0, 0xFF);
-		pm8xxx_writeb(chip->dev->parent, PSI_TXRX_SAMPLE_DATA_1, 0xFF);
-		pm8xxx_writeb(chip->dev->parent, PSI_TXRX_SAMPLE_DATA_2, 0xFF);
-		pm8xxx_writeb(chip->dev->parent, PSI_TXRX_SAMPLE_DATA_3, 0xFF);
-		pm8xxx_writeb(chip->dev->parent, PSI_CONFIG_STATUS, 0x0D);
-		udelay(100);
-		pm8xxx_writeb(chip->dev->parent, PSI_CONFIG_STATUS, 0x0C);
-	}
-
 	/* Workarounds for die 3.0 */
-	if (pm8xxx_get_revision(chip->dev->parent) == PM8XXX_REVISION_8921_3p0)
+	if (pm8xxx_get_revision(chip->dev->parent) == PM8XXX_REVISION_8921_3p0
+	&& pm8xxx_get_version(chip->dev->parent) == PM8XXX_VERSION_8921)
 		pm8xxx_writeb(chip->dev->parent, CHG_BUCK_CTRL_TEST3, 0xAC);
 
 	/* Enable isub_fine resolution AICL for PM8917 */
@@ -4049,6 +4044,7 @@ static int __devinit pm8921_charger_probe(struct platform_device *pdev)
 	chip->hot_thr = pdata->hot_thr;
 	chip->rconn_mohm = pdata->rconn_mohm;
 	chip->led_src_config = pdata->led_src_config;
+	chip->has_dc_supply = pdata->has_dc_supply;
 
 	rc = pm8921_chg_hw_init(chip);
 	if (rc) {

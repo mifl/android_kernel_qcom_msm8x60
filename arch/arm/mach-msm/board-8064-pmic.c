@@ -380,6 +380,7 @@ apq8064_pm8921_chg_pdata __devinitdata = {
 	.warm_bat_voltage	= 4100,
 	.thermal_mitigation	= apq8064_pm8921_therm_mitigation,
 	.thermal_levels		= ARRAY_SIZE(apq8064_pm8921_therm_mitigation),
+	.rconn_mohm		= 18,
 };
 
 static struct pm8xxx_ccadc_platform_data
@@ -466,5 +467,7 @@ void __init apq8064_init_pmic(void)
 		apq8064_pm8921_bms_pdata.battery_type = BATT_PALLADIUM;
 	} else if (machine_is_apq8064_liquid()) {
 		apq8064_pm8921_bms_pdata.battery_type = BATT_DESAY;
+	} else if (machine_is_apq8064_cdp()) {
+		apq8064_pm8921_chg_pdata.has_dc_supply = true;
 	}
 }

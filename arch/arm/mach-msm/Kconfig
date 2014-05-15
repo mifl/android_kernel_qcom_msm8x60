@@ -305,6 +305,7 @@ config ARCH_MSM8625
 	select ARM_TICKET_LOCKS
 	select MSM_RUN_QUEUE_STATS
 	select MIGHT_HAVE_CACHE_L2X0
+	select ARM_HAS_SG_CHAIN
 
 config ARCH_MSM9625
 	bool "MSM9625"
@@ -393,6 +394,7 @@ config ARCH_MSM7X27A
 	select ARM_GIC
 	select ARCH_MSM_CORTEXMP
 	select MIGHT_HAVE_CACHE_L2X0
+	select ARM_HAS_SG_CHAIN
 
 config  MSM_VIC
 	bool
@@ -700,6 +702,20 @@ config MACH_MSM8X55_SVLTE_SURF
        help
          Support for the Qualcomm MSM8x55 SVLTE SURF eval board.
 
+config MACH_MSM8X60_RUMI3
+	depends on ARCH_MSM8X60
+	default n
+	bool "MSM8x60 RUMI3"
+	help
+	  Support for the Qualcomm MSM8x60 RUMI3 emulator.
+
+config MACH_MSM8X60_SIM
+	depends on ARCH_MSM8X60
+	default n
+	bool "MSM8x60 Simulator"
+	help
+	  Support for the Qualcomm MSM8x60 simulator.
+
 config MACH_MSM8X60_SURF
 	depends on ARCH_MSM8X60
 	default n
@@ -744,6 +760,18 @@ config MACH_MSM8X60_DRAGON
 	bool "MSM8x60 DRAGON"
 	help
 	  Support for the Qualcomm MSM8x60 Dragon board.
+
+config MACH_MSM8960_SIM
+	depends on ARCH_MSM8960
+	bool "MSM8960 Simulator"
+	help
+	  Support for the Qualcomm MSM8960 simulator.
+
+config MACH_MSM8960_RUMI3
+	depends on ARCH_MSM8960
+	bool "MSM8960 RUMI3"
+	help
+	  Support for the Qualcomm MSM8960 RUMI3 emulator.
 
 config MACH_MSM8960_CDP
 	depends on ARCH_MSM8960

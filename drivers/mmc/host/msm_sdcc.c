@@ -1166,7 +1166,7 @@ msmsdcc_start_command_deferred(struct msmsdcc_host *host,
 		*c |= MCI_CSPM_DATCMD;
 
 	/* Check if AUTO CMD19 is required or not? */
-	if (host->tuning_needed &&
+	if (host->tuning_needed && host->en_auto_cmd19 &&
 		!(host->mmc->ios.timing == MMC_TIMING_MMC_HS200)) {
 
 		/*
@@ -1182,7 +1182,9 @@ msmsdcc_start_command_deferred(struct msmsdcc_host *host,
 			(cmd->opcode == MMC_READ_SINGLE_BLOCK ||
 			cmd->opcode == MMC_READ_MULTIPLE_BLOCK))) {
 			msmsdcc_enable_cdr_cm_sdc4_dll(host);
-			*c |= MCI_CSPM_AUTO_CMD19;
+			if (host->en_auto_cmd19 &&
+			    host->mmc->ios.timing == MMC_TIMING_UHS_SDR104)
+				*c |= MCI_CSPM_AUTO_CMD19;
 		}
 	}
 
@@ -2191,6 +2193,18 @@ static inline int msmsdcc_vreg_set_voltage(struct msm_mmc_reg_data *vreg,
 	return rc;
 }
 
+static inline int msmsdcc_vreg_get_voltage(struct msm_mmc_reg_data *vreg)
+{
+	int rc = 0;
+
+	rc = regulator_get_voltage(vreg->reg);
+	if (rc < 0)
+		pr_err("%s: regulator_get_voltage(%s) failed. rc=%d\n",
+			__func__, vreg->name, rc);
+
+	return rc;
+}
+
 static inline int msmsdcc_vreg_set_optimum_mode(struct msm_mmc_reg_data *vreg,
 						int uA_load)
 {
@@ -2434,6 +2448,82 @@ enum vdd_io_level {
 	 */
 	VDD_IO_SET_LEVEL,
 };
+
+/*
+ * This function returns the current VDD IO voltage level.
+ * Returns negative value if it fails to read the voltage level
+ * Returns 0 if regulator was disabled or if VDD_IO (and VDD)
+ * regulator were not defined for host.
+ */
+static int msmsdcc_get_vdd_io_vol(struct msmsdcc_host *host)
+{
+	int rc = 0;
+
+	if (host->plat->vreg_data) {
+		struct msm_mmc_reg_data *io_reg =
+			host->plat->vreg_data->vdd_io_data;
+
+		/*
+		 * If vdd_io is not defined, then we can consider that
+		 * IO voltage is same as VDD.
+		 */
+		if (!io_reg)
+			io_reg = host->plat->vreg_data->vdd_data;
+
+		if (io_reg && io_reg->is_enabled)
+			rc = msmsdcc_vreg_get_voltage(io_reg);
+	}
+
+	return rc;
+}
+
+/*
+ * This function updates the IO pad power switch bit in MCI_CLK register
+ * based on currrent IO pad voltage level.
+ * NOTE: This function assumes that host lock was not taken by caller.
+ */
+static void msmsdcc_update_io_pad_pwr_switch(struct msmsdcc_host *host)
+{
+	int rc = 0;
+	unsigned long flags;
+
+	if (!is_io_pad_pwr_switch(host))
+		return;
+
+	rc = msmsdcc_get_vdd_io_vol(host);
+
+	spin_lock_irqsave(&host->lock, flags);
+	/*
+	 * Dual voltage pad is the SDCC's (chipset) functionality and not all
+	 * the SDCC instances support the dual voltage pads.
+	 * For dual-voltage pad (1.8v/3.3v), SW should set IO_PAD_PWR_SWITCH
+	 * bit before using the pads in 1.8V mode.
+	 * For regular, not dual-voltage pads (including eMMC 1.2v/1.8v pads),
+	 * IO_PAD_PWR_SWITCH bit is a don't care.
+	 * But we don't have an option to know (by reading some SDCC register)
+	 * that a particular SDCC instance supports dual voltage pads or not,
+	 * so we simply set the IO_PAD_PWR_SWITCH bit for low voltage IO
+	 * (1.8v/1.2v). For regular (not dual-voltage pads), this bit value
+	 * is anyway ignored.
+	 */
+	if (rc > 0 && rc < 2700000)
+		host->io_pad_pwr_switch = 1;
+	else
+		host->io_pad_pwr_switch = 0;
+
+	if (atomic_read(&host->clks_on)) {
+		if (host->io_pad_pwr_switch)
+			writel_relaxed((readl_relaxed(host->base + MMCICLOCK) |
+					IO_PAD_PWR_SWITCH),
+					host->base + MMCICLOCK);
+		else
+			writel_relaxed((readl_relaxed(host->base + MMCICLOCK) &
+					~IO_PAD_PWR_SWITCH),
+					host->base + MMCICLOCK);
+		msmsdcc_sync_reg_wr(host);
+	}
+	spin_unlock_irqrestore(&host->lock, flags);
+}
 
 static int msmsdcc_set_vdd_io_vol(struct msmsdcc_host *host,
 				  enum vdd_io_level level,
@@ -2736,6 +2826,7 @@ static u32 msmsdcc_setup_pwr(struct msmsdcc_host *host, struct mmc_ios *ios)
 		 * present or during system suspend).
 		 */
 		msmsdcc_set_vdd_io_vol(host, VDD_IO_LOW, 0);
+		msmsdcc_update_io_pad_pwr_switch(host);
 		msmsdcc_setup_pins(host, false);
 		break;
 	case MMC_POWER_UP:
@@ -2744,6 +2835,7 @@ static u32 msmsdcc_setup_pwr(struct msmsdcc_host *host, struct mmc_ios *ios)
 		msmsdcc_cfg_mpm_sdiowakeup(host, SDC_DAT1_ENABLE);
 
 		msmsdcc_set_vdd_io_vol(host, VDD_IO_HIGH, 0);
+		msmsdcc_update_io_pad_pwr_switch(host);
 		msmsdcc_setup_pins(host, true);
 		break;
 	case MMC_POWER_ON:
@@ -3156,10 +3248,6 @@ msmsdcc_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 	/* Select free running MCLK as input clock of cm_dll_sdc4 */
 	clk |= (2 << 23);
 
-	/* Clear IO_PAD_PWR_SWITCH while powering off the card */
-	if (!ios->vdd)
-		host->io_pad_pwr_switch = 0;
-
 	if (host->io_pad_pwr_switch)
 		clk |= IO_PAD_PWR_SWITCH;
 
@@ -3291,6 +3379,9 @@ static void msmsdcc_print_rpm_info(struct msmsdcc_host *host)
 {
 	struct device *dev = mmc_dev(host->mmc);
 
+	pr_info("%s: PM: sdcc_suspended=%d, pending_resume=%d, sdcc_suspending=%d\n",
+		mmc_hostname(host->mmc), host->sdcc_suspended,
+		host->pending_resume, host->sdcc_suspending);
 	pr_info("%s: RPM: runtime_status=%d, usage_count=%d,"
 		" is_suspended=%d, disable_depth=%d, runtime_error=%d,"
 		" request_pending=%d, request=%d\n",
@@ -3312,8 +3403,7 @@ static int msmsdcc_enable(struct mmc_host *mmc)
 	if (mmc->card && mmc_card_sdio(mmc->card))
 		goto out;
 
-	if (host->sdcc_suspended && host->pending_resume &&
-			!pm_runtime_suspended(dev)) {
+	if (host->sdcc_suspended && host->pending_resume) {
 		host->pending_resume = false;
 		pm_runtime_get_noresume(dev);
 		rc = msmsdcc_runtime_resume(dev);
@@ -3334,8 +3424,8 @@ static int msmsdcc_enable(struct mmc_host *mmc)
 
 skip_get_sync:
 	if (rc < 0) {
-		pr_info("%s: %s: failed with error %d", mmc_hostname(mmc),
-				__func__, rc);
+		WARN(1, "%s: %s: failed with error %d\n", mmc_hostname(mmc),
+		     __func__, rc);
 		msmsdcc_print_rpm_info(host);
 		return rc;
 	}
@@ -3361,15 +3451,9 @@ static int msmsdcc_disable(struct mmc_host *mmc)
 
 	rc = pm_runtime_put_sync(mmc->parent);
 
-	/*
-	 * Ignore -EAGAIN as that is not fatal, it means that
-	 * either runtime usage count is non-zero or the runtime
-	 * pm itself is disabled or not in proper state to process
-	 * idle notification.
-	 */
-	if (rc < 0 && (rc != -EAGAIN)) {
-		pr_info("%s: %s: failed with error %d", mmc_hostname(mmc),
-				__func__, rc);
+	if (rc < 0) {
+		WARN(1, "%s: %s: failed with error %d\n", mmc_hostname(mmc),
+		     __func__, rc);
 		msmsdcc_print_rpm_info(host);
 		return rc;
 	}
@@ -3448,14 +3532,12 @@ static int msmsdcc_switch_io_voltage(struct mmc_host *mmc,
 	unsigned long flags;
 	int rc = 0;
 
-	spin_lock_irqsave(&host->lock, flags);
-	host->io_pad_pwr_switch = 0;
-	spin_unlock_irqrestore(&host->lock, flags);
-
 	switch (ios->signal_voltage) {
 	case MMC_SIGNAL_VOLTAGE_330:
 		/* Set VDD IO to high voltage range (2.7v - 3.6v) */
 		rc = msmsdcc_set_vdd_io_vol(host, VDD_IO_HIGH, 0);
+		if (!rc)
+			msmsdcc_update_io_pad_pwr_switch(host);
 		goto out;
 	case MMC_SIGNAL_VOLTAGE_180:
 		break;
@@ -3466,6 +3548,8 @@ static int msmsdcc_switch_io_voltage(struct mmc_host *mmc,
 		 * DDR 1.2V mode.
 		 */
 		rc = msmsdcc_set_vdd_io_vol(host, VDD_IO_SET_LEVEL, 1200000);
+		if (!rc)
+			msmsdcc_update_io_pad_pwr_switch(host);
 		goto out;
 	default:
 		/* invalid selection. don't do anything */
@@ -3504,12 +3588,7 @@ static int msmsdcc_switch_io_voltage(struct mmc_host *mmc,
 	if (rc)
 		goto out;
 
-	spin_lock_irqsave(&host->lock, flags);
-	writel_relaxed((readl_relaxed(host->base + MMCICLOCK) |
-			IO_PAD_PWR_SWITCH), host->base + MMCICLOCK);
-	msmsdcc_sync_reg_wr(host);
-	host->io_pad_pwr_switch = 1;
-	spin_unlock_irqrestore(&host->lock, flags);
+	msmsdcc_update_io_pad_pwr_switch(host);
 
 	/* Wait 5 ms for the voltage regulater in the card to become stable. */
 	usleep_range(5000, 5500);
@@ -4754,6 +4833,42 @@ store_idle_timeout(struct device *dev, struct device_attribute *attr,
 	return count;
 }
 
+static inline void set_auto_cmd_setting(struct device *dev,
+					 const char *buf,
+					 bool is_cmd19)
+{
+	struct mmc_host *mmc = dev_get_drvdata(dev);
+	struct msmsdcc_host *host = mmc_priv(mmc);
+	unsigned int long flags;
+	int temp;
+
+	if (!kstrtou32(buf, 0, &temp)) {
+		spin_lock_irqsave(&host->lock, flags);
+		if (is_cmd19)
+			host->en_auto_cmd19 = !!temp;
+		spin_unlock_irqrestore(&host->lock, flags);
+	}
+}
+
+static ssize_t
+show_enable_auto_cmd19(struct device *dev, struct device_attribute *attr,
+		       char *buf)
+{
+	struct mmc_host *mmc = dev_get_drvdata(dev);
+	struct msmsdcc_host *host = mmc_priv(mmc);
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", host->en_auto_cmd19);
+}
+
+static ssize_t
+store_enable_auto_cmd19(struct device *dev, struct device_attribute *attr,
+			const char *buf, size_t count)
+{
+	set_auto_cmd_setting(dev, buf, true);
+
+	return count;
+}
+
 #ifdef CONFIG_HAS_EARLYSUSPEND
 static void msmsdcc_early_suspend(struct early_suspend *h)
 {
@@ -5892,8 +6007,25 @@ msmsdcc_probe(struct platform_device *pdev)
 	ret = device_create_file(&pdev->dev, &host->idle_timeout);
 	if (ret)
 		goto remove_polling_file;
+
+	if (!is_auto_cmd19(host))
+		goto exit;
+
+	/* Sysfs entry for AUTO CMD19 control */
+	host->auto_cmd19_attr.show = show_enable_auto_cmd19;
+	host->auto_cmd19_attr.store = store_enable_auto_cmd19;
+	sysfs_attr_init(&host->auto_cmd19_attr.attr);
+	host->auto_cmd19_attr.attr.name = "enable_auto_cmd19";
+	host->auto_cmd19_attr.attr.mode = S_IRUGO | S_IWUSR;
+	ret = device_create_file(&pdev->dev, &host->auto_cmd19_attr);
+	if (ret)
+		goto remove_idle_timeout_file;
+
+ exit:
 	return 0;
 
+ remove_idle_timeout_file:
+	device_remove_file(&pdev->dev, &host->idle_timeout);
  remove_polling_file:
 	if (!plat->status_irq)
 		device_remove_file(&pdev->dev, &host->polling);
@@ -5974,6 +6106,8 @@ static int msmsdcc_remove(struct platform_device *pdev)
 	DBG(host, "Removing SDCC device = %d\n", pdev->id);
 	plat = host->plat;
 
+	if (is_auto_cmd19(host))
+		device_remove_file(&pdev->dev, &host->auto_cmd19_attr);
 	device_remove_file(&pdev->dev, &host->max_bus_bw);
 	if (!plat->status_irq)
 		device_remove_file(&pdev->dev, &host->polling);
@@ -6262,6 +6396,7 @@ msmsdcc_runtime_resume(struct device *dev)
 
 		wake_unlock(&host->sdio_suspend_wlock);
 	}
+	host->pending_resume = false;
 	pr_debug("%s: %s: end\n", mmc_hostname(mmc), __func__);
 	return 0;
 }
@@ -6334,7 +6469,13 @@ static int msmsdcc_pm_resume(struct device *dev)
 
 	if (mmc->card && mmc_card_sdio(mmc->card))
 		rc = msmsdcc_runtime_resume(dev);
-	else
+	/*
+	 * As runtime PM is enabled before calling the device's platform resume
+	 * callback, we use the pm_runtime_suspended API to know if SDCC is
+	 * really runtime suspended or not and set the pending_resume flag only
+	 * if its not runtime suspended.
+	 */
+	else if (!pm_runtime_suspended(dev))
 		host->pending_resume = true;
 
 	if (host->plat->status_irq) {
