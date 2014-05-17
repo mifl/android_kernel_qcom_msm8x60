@@ -96,20 +96,6 @@ ENTRY(msm_pm_collapse)
 	mrc     p15, 0, r9, c13, c0, 3 /* TPIDRURO */
 	mrc     p15, 0, ip, c13, c0, 1 /* context ID */
 	stmia   r0!, {r1-r9, ip}
-#ifdef CONFIG_MSM_CPU_AVS
-	mrc     p15, 7, r1, c15, c1, 7 /* AVSCSR is the Adaptive Voltage Scaling
-	                                * Control and Status Register */
-	mrc     p15, 7, r2, c15, c0, 6 /* AVSDSCR is the Adaptive Voltage
-	                                * Scaling Delay Synthesizer Control
-					* Register */
-#ifndef CONFIG_ARCH_MSM_KRAIT
-	mrc     p15, 7, r3, c15, c1, 0 /* TSCSR is the Temperature Status and
-	                                * Control Register
-					*/
-#endif
-
-	stmia   r0!, {r1-r3}
-#endif
 
 #ifdef CONFIG_MSM_JTAG
 	bl      msm_jtag_save_state
@@ -196,14 +182,6 @@ ENTRY(msm_pm_collapse_exit)
 	add	r1, r1, r2
 #endif
 
-#ifdef CONFIG_MSM_CPU_AVS
-	ldmdb   r1!, {r2-r4}
-#ifndef CONFIG_ARCH_MSM_KRAIT
-	mcr     p15, 7, r4, c15, c1, 0 /* TSCSR */
-#endif
-	mcr     p15, 7, r3, c15, c0, 6 /* AVSDSCR */
-	mcr     p15, 7, r2, c15, c1, 7 /* AVSCSR */
-#endif
 	ldmdb   r1!, {r2-r11}
 	mcr     p15, 0, r4, c3, c0, 0 /* dacr */
 	mcr     p15, 0, r3, c2, c0, 0 /* TTBR0 */
@@ -286,9 +264,14 @@ ENTRY(msm_pm_boot_entry)
 	ldr     pc, [r1]                 /* jump                           */
 
 ENTRY(msm_pm_set_l2_flush_flag)
-	ldr r1, =msm_pm_flush_l2_flag
-	str r0, [r1]
-	bx lr
+	ldr     r1, =msm_pm_flush_l2_flag
+	str     r0, [r1]
+	bx      lr
+
+ENTRY(msm_pm_get_l2_flush_flag)
+	ldr     r1, =msm_pm_flush_l2_flag
+	ldr     r0, [r1]
+	bx      lr
 
 	.data
 

@@ -68,6 +68,7 @@ struct ehci_timer {
 
 struct msm_hsic_hcd {
 	struct ehci_hcd		ehci;
+	spinlock_t		wakeup_lock;
 	struct device		*dev;
 	struct clk		*ahb_clk;
 	struct clk		*core_clk;
@@ -309,7 +310,7 @@ static void dump_hsic_regs(struct usb_hcd *hcd)
 #define ULPI_IO_TIMEOUT_USEC	(10 * 1000)
 
 #define USB_PHY_VDD_DIG_VOL_NONE	0 /*uV */
-#define USB_PHY_VDD_DIG_VOL_MIN		1000000 /* uV */
+#define USB_PHY_VDD_DIG_VOL_MIN		945000 /* uV */
 #define USB_PHY_VDD_DIG_VOL_MAX		1320000 /* uV */
 
 #define HSIC_DBG1_REG		0x38
@@ -637,6 +638,7 @@ static int msm_hsic_suspend(struct msm_hsic_hcd *mehci)
 	int cnt = 0, ret;
 	u32 val;
 	int none_vol, max_vol;
+	struct msm_hsic_host_platform_data *pdata = mehci->dev->platform_data;
 
 	if (atomic_read(&mehci->in_lpm)) {
 		dev_dbg(mehci->dev, "%s called in lpm\n", __func__);
@@ -715,9 +717,13 @@ static int msm_hsic_suspend(struct msm_hsic_hcd *mehci)
 	enable_irq_wake(mehci->wakeup_irq);
 	enable_irq(mehci->wakeup_irq);
 
+	if (pdata && pdata->standalone_latency)
+		pm_qos_update_request(&mehci->pm_qos_req_dma,
+			PM_QOS_DEFAULT_VALUE);
+
 	wake_unlock(&mehci->wlock);
 
-	dev_info(mehci->dev, "HSIC-USB in low power mode\n");
+	dev_dbg(mehci->dev, "HSIC-USB in low power mode\n");
 
 	return 0;
 }
@@ -728,17 +734,25 @@ static int msm_hsic_resume(struct msm_hsic_hcd *mehci)
 	int cnt = 0, ret;
 	unsigned temp;
 	int min_vol, max_vol;
+	unsigned long flags;
+	struct msm_hsic_host_platform_data *pdata = mehci->dev->platform_data;
 
 	if (!atomic_read(&mehci->in_lpm)) {
 		dev_dbg(mehci->dev, "%s called in !in_lpm\n", __func__);
 		return 0;
 	}
 
+	if (pdata && pdata->standalone_latency)
+		pm_qos_update_request(&mehci->pm_qos_req_dma,
+			pdata->standalone_latency + 1);
+
+	spin_lock_irqsave(&mehci->wakeup_lock, flags);
 	if (mehci->wakeup_irq_enabled) {
 		disable_irq_wake(mehci->wakeup_irq);
 		disable_irq_nosync(mehci->wakeup_irq);
 		mehci->wakeup_irq_enabled = 0;
 	}
+	spin_unlock_irqrestore(&mehci->wakeup_lock, flags);
 
 	wake_lock(&mehci->wlock);
 
@@ -805,7 +819,7 @@ skip_phy_resume:
 		pm_runtime_put_noidle(mehci->dev);
 	}
 
-	dev_info(mehci->dev, "HSIC-USB exited from low power mode\n");
+	dev_dbg(mehci->dev, "HSIC-USB exited from low power mode\n");
 
 	return 0;
 }
@@ -1029,9 +1043,9 @@ resume_again:
 				pm_qos_update_request(&mehci->pm_qos_req_dma,
 					pdata->swfi_latency + 1);
 			wait_for_completion(&mehci->gpt0_completion);
-			if (pdata && pdata->swfi_latency)
+			if (pdata && pdata->standalone_latency)
 				pm_qos_update_request(&mehci->pm_qos_req_dma,
-					PM_QOS_DEFAULT_VALUE);
+					pdata->standalone_latency + 1);
 			spin_lock_irq(&ehci->lock);
 		} else {
 			dbg_log_event(NULL, "FPR: Tightloop", 0);
@@ -1267,6 +1281,7 @@ static irqreturn_t hsic_peripheral_status_change(int irq, void *dev_id)
 static irqreturn_t msm_hsic_wakeup_irq(int irq, void *data)
 {
 	struct msm_hsic_hcd *mehci = data;
+	int ret;
 
 	mehci->wakeup_int_cnt++;
 	dbg_log_event(NULL, "Remote Wakeup IRQ", mehci->wakeup_int_cnt);
@@ -1275,15 +1290,26 @@ static irqreturn_t msm_hsic_wakeup_irq(int irq, void *data)
 
 	wake_lock(&mehci->wlock);
 
+	spin_lock(&mehci->wakeup_lock);
 	if (mehci->wakeup_irq_enabled) {
 		mehci->wakeup_irq_enabled = 0;
 		disable_irq_wake(irq);
 		disable_irq_nosync(irq);
 	}
+	spin_unlock(&mehci->wakeup_lock);
 
 	if (!atomic_read(&mehci->pm_usage_cnt)) {
-		atomic_set(&mehci->pm_usage_cnt, 1);
-		pm_runtime_get(mehci->dev);
+		ret = pm_runtime_get(mehci->dev);
+		/*
+		 * HSIC runtime resume can race with us.
+		 * if we are active (ret == 1) or resuming
+		 * (ret == -EINPROGRESS), decrement the
+		 * PM usage counter before returning.
+		 */
+		if ((ret == 1) || (ret == -EINPROGRESS))
+			pm_runtime_put_noidle(mehci->dev);
+		else
+			atomic_set(&mehci->pm_usage_cnt, 1);
 	}
 
 	return IRQ_HANDLED;
@@ -1508,6 +1534,8 @@ static int __devinit ehci_hsic_msm_probe(struct platform_device *pdev)
 		return  -ENOMEM;
 	}
 
+	hcd_to_bus(hcd)->skip_resume = true;
+
 	hcd->irq = platform_get_irq(pdev, 0);
 	if (hcd->irq < 0) {
 		dev_err(&pdev->dev, "Unable to get IRQ resource\n");
@@ -1534,6 +1562,8 @@ static int __devinit ehci_hsic_msm_probe(struct platform_device *pdev)
 	mehci = hcd_to_hsic(hcd);
 	mehci->dev = &pdev->dev;
 	pdata = mehci->dev->platform_data;
+
+	spin_lock_init(&mehci->wakeup_lock);
 
 	mehci->ehci.susp_sof_bug = 1;
 	mehci->ehci.reset_sof_bug = 1;
@@ -1646,9 +1676,9 @@ static int __devinit ehci_hsic_msm_probe(struct platform_device *pdev)
 
 	__mehci = mehci;
 
-	if (pdata && pdata->swfi_latency)
+	if (pdata && pdata->standalone_latency)
 		pm_qos_add_request(&mehci->pm_qos_req_dma,
-			PM_QOS_CPU_DMA_LATENCY, PM_QOS_DEFAULT_VALUE);
+			PM_QOS_CPU_DMA_LATENCY, pdata->standalone_latency + 1);
 
 	/*
 	 * This pdev->dev is assigned parent of root-hub by USB core,
@@ -1687,7 +1717,7 @@ static int __devexit ehci_hsic_msm_remove(struct platform_device *pdev)
 	struct msm_hsic_hcd *mehci = hcd_to_hsic(hcd);
 	struct msm_hsic_host_platform_data *pdata = mehci->dev->platform_data;
 
-	if (pdata && pdata->swfi_latency)
+	if (pdata && pdata->standalone_latency)
 		pm_qos_remove_request(&mehci->pm_qos_req_dma);
 
 	if (mehci->peripheral_status_irq)
@@ -1774,6 +1804,16 @@ static int msm_hsic_pm_resume(struct device *dev)
 
 	if (device_may_wakeup(dev))
 		disable_irq_wake(hcd->irq);
+
+	/*
+	 * Keep HSIC in Low Power Mode if system is resumed
+	 * by any other wakeup source.  HSIC is resumed later
+	 * when remote wakeup is received or interface driver
+	 * start I/O.
+	 */
+	if (!atomic_read(&mehci->pm_usage_cnt) &&
+			pm_runtime_suspended(dev))
+		return 0;
 
 	ret = msm_hsic_resume(mehci);
 	if (ret)

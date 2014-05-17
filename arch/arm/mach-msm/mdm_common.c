@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2011-2013, Code Aurora Forum, All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -33,6 +33,7 @@
 #include <linux/msm_charm.h>
 #include <asm/mach-types.h>
 #include <asm/uaccess.h>
+#include <asm/atomic.h>
 #include <mach/mdm2.h>
 #include <mach/restart.h>
 #include <mach/subsystem_notif.h>
@@ -65,6 +66,7 @@ DECLARE_COMPLETION(mdm_boot);
 DECLARE_COMPLETION(mdm_ram_dumps);
 
 static int first_boot = 1;
+static atomic_t ssr_in_progress;
 
 #define RD_BUF_SIZE			100
 #define SFR_MAX_RETRIES		10
@@ -136,6 +138,11 @@ static void mdm_restart_reason_fn(struct work_struct *work)
 
 	do {
 		msleep(SFR_RETRY_INTERVAL);
+		/* Calling sysmon during an SSR may cause unclocked
+		 * accesses.
+		 */
+		if (atomic_read(&ssr_in_progress) > 0)
+			break;
 		ret = sysmon_get_reason(SYSMON_SS_EXT_MODEM,
 					sfr_buf, sizeof(sfr_buf));
 		if (ret) {
@@ -290,6 +297,18 @@ long mdm_modem_ioctl(struct file *filp, unsigned int cmd,
 		} else
 			pr_debug("%s Image upgrade not supported\n", __func__);
 		break;
+	case SHUTDOWN_CHARM:
+		if (!mdm_drv->pdata->send_shdn)
+			break;
+		mdm_drv->mdm_ready = 0;
+		if (mdm_debug_mask & MDM_DEBUG_MASK_SHDN_LOG)
+			pr_info("Sending shutdown request to mdm\n");
+		ret = sysmon_send_shutdown(SYSMON_SS_EXT_MODEM);
+		if (ret)
+			pr_err("%s: Graceful shutdown of the external modem failed, ret = %d\n",
+				   __func__, ret);
+		put_user(ret, (unsigned long __user *) arg);
+		break;
 	default:
 		pr_err("%s: invalid ioctl cmd = %d\n", __func__, _IOC_NR(cmd));
 		ret = -EINVAL;
@@ -382,6 +401,9 @@ static irqreturn_t mdm_status_change(int irq, void *dev_id)
 {
 	int value = gpio_get_value(mdm_drv->mdm2ap_status_gpio);
 
+	if ((mdm_debug_mask & MDM_DEBUG_MASK_SHDN_LOG) && (value == 0))
+		pr_info("%s: mdm2ap_status went low\n", __func__);
+
 	pr_debug("%s: mdm sent status change interrupt\n", __func__);
 	if (value == 0 && mdm_drv->mdm_ready == 1) {
 		pr_info("%s: unexpected reset external modem\n", __func__);
@@ -408,6 +430,7 @@ static int mdm_subsys_shutdown(const struct subsys_desc *crashed_subsys)
 {
 	mdm_drv->mdm_ready = 0;
 	cancel_delayed_work(&mdm2ap_status_check_work);
+	atomic_inc(&ssr_in_progress);
 	gpio_direction_output(mdm_drv->ap2mdm_errfatal_gpio, 1);
 	if (mdm_drv->pdata->ramdump_delay_ms > 0) {
 		/* Wait for the external modem to complete
@@ -444,6 +467,7 @@ static int mdm_subsys_powerup(const struct subsys_desc *crashed_subsys)
 			queue_work(mdm_sfr_queue, &sfr_reason_work);
 	}
 	INIT_COMPLETION(mdm_boot);
+	atomic_dec(&ssr_in_progress);
 	return mdm_drv->mdm_boot_status;
 }
 

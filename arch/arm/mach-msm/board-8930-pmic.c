@@ -214,7 +214,8 @@ static struct pm8921_charger_platform_data pm8921_chg_pdata __devinitdata = {
 	.max_voltage		= MAX_VOLTAGE_MV,
 	.min_voltage		= 3200,
 	.uvd_thresh_voltage	= 4050,
-	.resume_voltage_delta	= 100,
+	.resume_voltage_delta	= 60,
+	.resume_charge_percent	= 99,
 	.term_current		= CHG_TERM_MA,
 	.cool_temp		= 10,
 	.warm_temp		= 40,
@@ -336,8 +337,22 @@ static struct pm8xxx_misc_platform_data pm8xxx_misc_pdata = {
 	.priority		= 0,
 };
 
+/*
+ *	0x254=0xC8 (Threshold=110, preamp bias=01)
+ *	0x255=0xC1 (Hold=110, max attn=0000, mute=1)
+ *	0x256=0xB0 (decay=101, attack=10, delay=0)
+ */
+
 static struct pm8xxx_spk_platform_data pm8xxx_spk_pdata = {
 	.spk_add_enable		= false,
+	.cd_ng_threshold	= 0x0,
+	.cd_nf_preamp_bias	= 0x1,
+	.cd_ng_hold		= 0x6,
+	.cd_ng_max_atten	= 0x0,
+	.noise_mute		= 1,
+	.cd_ng_decay_rate	= 0x5,
+	.cd_ng_attack_rate	= 0x2,
+	.cd_delay		= 0x0,
 };
 
 static struct pm8921_bms_platform_data pm8921_bms_pdata __devinitdata = {

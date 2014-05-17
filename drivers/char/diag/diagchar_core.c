@@ -122,6 +122,27 @@ void diag_drain_work_fn(struct work_struct *work)
 	mutex_unlock(&driver->diagchar_mutex);
 }
 
+#ifdef CONFIG_DIAG_BRIDGE_CODE
+void diag_clear_hsic_tbl(void)
+{
+	int i;
+
+	driver->num_hsic_buf_tbl_entries = 0;
+	for (i = 0; i < driver->poolsize_hsic_write; i++) {
+		if (driver->hsic_buf_tbl[i].buf) {
+			/* Return the buffer to the pool */
+			diagmem_free(driver, (unsigned char *)
+				(driver->hsic_buf_tbl[i].buf),
+				POOL_TYPE_HSIC);
+			driver->hsic_buf_tbl[i].buf = 0;
+		}
+		driver->hsic_buf_tbl[i].length = 0;
+	}
+}
+#else
+void diag_clear_hsic_tbl(void) { }
+#endif
+
 void diag_read_smd_work_fn(struct work_struct *work)
 {
 	__diag_smd_send_req();
@@ -243,6 +264,7 @@ static int diagchar_close(struct inode *inode, struct file *file)
 		driver->logging_mode = USB_MODE;
 		diagfwd_connect();
 #ifdef CONFIG_DIAG_BRIDGE_CODE
+		diag_clear_hsic_tbl();
 		diagfwd_cancel_hsic();
 		diagfwd_connect_bridge(0);
 #endif
@@ -489,6 +511,7 @@ long diagchar_ioctl(struct file *filp,
 		temp = driver->logging_mode;
 		driver->logging_mode = (int)ioarg;
 		if (driver->logging_mode == MEMORY_DEVICE_MODE) {
+			diag_clear_hsic_tbl();
 			driver->mask_check = 1;
 			if (driver->socket_process) {
 				/*
@@ -506,6 +529,7 @@ long diagchar_ioctl(struct file *filp,
 			}
 		}
 		if (driver->logging_mode == UART_MODE) {
+			diag_clear_hsic_tbl();
 			driver->mask_check = 0;
 			driver->logging_mode = MEMORY_DEVICE_MODE;
 		}
@@ -529,6 +553,7 @@ long diagchar_ioctl(struct file *filp,
 #endif
 #ifdef CONFIG_DIAG_BRIDGE_CODE
 			diagfwd_disconnect_bridge(0);
+			diag_clear_hsic_tbl();
 #endif
 		} else if (temp == NO_LOGGING_MODE && driver->logging_mode
 							== MEMORY_DEVICE_MODE) {
@@ -581,6 +606,7 @@ long diagchar_ioctl(struct file *filp,
 			driver->in_busy_qdsp_2 = 0;
 			driver->in_busy_wcnss_1 = 0;
 			driver->in_busy_wcnss_2 = 0;
+
 			/* Poll SMD channels to check for data*/
 			if (driver->ch)
 				queue_work(driver->diag_wq,
@@ -606,6 +632,7 @@ long diagchar_ioctl(struct file *filp,
 				 driver->logging_mode == USB_MODE) {
 			diagfwd_connect();
 #ifdef CONFIG_DIAG_BRIDGE_CODE
+			diag_clear_hsic_tbl();
 			diagfwd_cancel_hsic();
 			diagfwd_connect_bridge(0);
 #endif
@@ -637,6 +664,11 @@ static int diagchar_read(struct file *file, char __user *buf, size_t count,
 
 	if ((driver->data_ready[index] & USER_SPACE_LOG_TYPE) && (driver->
 					logging_mode == MEMORY_DEVICE_MODE)) {
+#ifdef CONFIG_DIAG_BRIDGE_CODE
+		unsigned long spin_lock_flags;
+		struct diag_write_device hsic_buf_tbl[NUM_HSIC_BUF_TBL_ENTRIES];
+#endif
+
 		pr_debug("diag: process woken up\n");
 		/*Copy the type of data being passed*/
 		data_type = driver->data_ready[index] & USER_SPACE_LOG_TYPE;
@@ -767,20 +799,51 @@ drop:
 		}
 #endif
 #ifdef CONFIG_DIAG_BRIDGE_CODE
-		pr_debug("diag: Copy data to user space %d\n",
-			 driver->in_busy_hsic_write_on_device);
-		if (driver->in_busy_hsic_write_on_device == 1) {
-			num_data++;
-			/*Copy the length of data being passed*/
-			COPY_USER_SPACE_OR_EXIT(buf+ret,
-				 (driver->write_ptr_mdm->length), 4);
-			/*Copy the actual data being passed*/
-			COPY_USER_SPACE_OR_EXIT(buf+ret,
-					*(driver->buf_in_hsic),
-					 driver->write_ptr_mdm->length);
-			pr_debug("diag: data copied\n");
-			/* call the write complete function */
-			diagfwd_write_complete_hsic();
+		spin_lock_irqsave(&driver->hsic_spinlock, spin_lock_flags);
+		for (i = 0; i < driver->poolsize_hsic_write; i++) {
+			hsic_buf_tbl[i].buf = driver->hsic_buf_tbl[i].buf;
+			driver->hsic_buf_tbl[i].buf = 0;
+			hsic_buf_tbl[i].length =
+					driver->hsic_buf_tbl[i].length;
+			driver->hsic_buf_tbl[i].length = 0;
+		}
+		driver->num_hsic_buf_tbl_entries = 0;
+		spin_unlock_irqrestore(&driver->hsic_spinlock,
+					spin_lock_flags);
+
+		for (i = 0; i < driver->poolsize_hsic_write; i++) {
+			if (hsic_buf_tbl[i].length > 0) {
+				pr_debug("diag: HSIC copy to user, i: %d, buf: %x, len: %d\n",
+					 i, (unsigned int)hsic_buf_tbl[i].buf,
+					hsic_buf_tbl[i].length);
+				num_data++;
+				/* Copy the length of data being passed */
+				if (copy_to_user(buf+ret,
+					(void *)&(hsic_buf_tbl[i].length),
+					4)) {
+					num_data--;
+					goto drop_hsic;
+				}
+				ret += 4;
+
+				/* Copy the actual data being passed */
+				if (copy_to_user(buf+ret,
+						(void *)hsic_buf_tbl[i].buf,
+						hsic_buf_tbl[i].length)) {
+					ret -= 4;
+					num_data--;
+					goto drop_hsic;
+				}
+				ret += hsic_buf_tbl[i].length;
+drop_hsic:
+				/* Return the buffer to the pool */
+				diagmem_free(driver,
+					(unsigned char *)(hsic_buf_tbl[i].buf),
+					POOL_TYPE_HSIC);
+
+				/* Call the write complete function */
+				diagfwd_write_complete_hsic(NULL);
+			}
 		}
 #endif
 		/* copy number of data fields */

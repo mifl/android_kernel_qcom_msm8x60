@@ -62,6 +62,7 @@ static struct clk *codec_clk;
 static int clk_users;
 
 static int msm8930_headset_gpios_configured;
+static struct mutex cdc_mclk_mutex;
 
 static struct snd_soc_jack hs_jack;
 static struct snd_soc_jack button_jack;
@@ -139,8 +140,12 @@ static void msm8960_ext_spk_power_amp_on(u32 spk)
 		if ((msm8930_ext_spk_pamp & SPK_AMP_POS) &&
 			(msm8930_ext_spk_pamp & SPK_AMP_NEG)) {
 
-			if (machine_is_msm8930_mtp()
-				|| machine_is_msm8930_fluid()) {
+			/*
+			 * 8930 CDP does not have a 5V speaker boost,
+			 * hence the GPIO enable for speaker boost is
+			 * only required for platforms other than CDP
+			 */
+			if (!machine_is_msm8930_cdp()) {
 				pr_debug("%s: Configure Speaker Boost GPIO %u",
 						__func__, SPKR_BOOST_GPIO);
 				ret = gpio_request(SPKR_BOOST_GPIO,
@@ -175,8 +180,8 @@ static void msm8960_ext_spk_power_amp_off(u32 spk)
 	if (spk & (SPK_AMP_POS | SPK_AMP_NEG)) {
 		if (!msm8930_ext_spk_pamp)
 			return;
-		if (machine_is_msm8930_mtp()
-			|| machine_is_msm8930_fluid()) {
+
+		if (!machine_is_msm8930_cdp()) {
 			pr_debug("%s: Free speaker boost gpio %u\n",
 					__func__, SPKR_BOOST_GPIO);
 			gpio_direction_output(SPKR_BOOST_GPIO, 0);
@@ -229,35 +234,42 @@ static int msm8930_enable_codec_ext_clk(
 		struct snd_soc_codec *codec, int enable,
 		bool dapm)
 {
+	int r = 0;
 	pr_debug("%s: enable = %d\n", __func__, enable);
+
+	mutex_lock(&cdc_mclk_mutex);
 	if (enable) {
 		clk_users++;
 		pr_debug("%s: clk_users = %d\n", __func__, clk_users);
-		if (clk_users != 1)
-			return 0;
-
-		if (codec_clk) {
-			clk_set_rate(codec_clk, SITAR_EXT_CLK_RATE);
-			clk_prepare_enable(codec_clk);
-			sitar_mclk_enable(codec, 1, dapm);
-		} else {
-			pr_err("%s: Error setting Sitar MCLK\n", __func__);
-			clk_users--;
-			return -EINVAL;
+		if (clk_users == 1) {
+			if (codec_clk) {
+				clk_set_rate(codec_clk, SITAR_EXT_CLK_RATE);
+				clk_prepare_enable(codec_clk);
+				sitar_mclk_enable(codec, 1, dapm);
+			} else {
+				pr_err("%s: Error setting Sitar MCLK\n",
+					__func__);
+				clk_users--;
+				r = -EINVAL;
+			}
 		}
 	} else {
-		pr_debug("%s: clk_users = %d\n", __func__, clk_users);
-		if (clk_users == 0)
-			return 0;
-		clk_users--;
-		if (!clk_users) {
-			pr_debug("%s: disabling MCLK. clk_users = %d\n",
+		if (clk_users > 0) {
+			clk_users--;
+			pr_debug("%s: clk_users = %d\n", __func__, clk_users);
+			if (clk_users == 0) {
+				pr_debug("%s: disabling MCLK. clk_users = %d\n",
 					 __func__, clk_users);
-			sitar_mclk_enable(codec, 0, dapm);
-			clk_disable_unprepare(codec_clk);
+				sitar_mclk_enable(codec, 0, dapm);
+				clk_disable_unprepare(codec_clk);
+			}
+		} else {
+			pr_err("%s: Error releasing Sitar MCLK\n", __func__);
+			r = -EINVAL;
 		}
 	}
-	return 0;
+	mutex_unlock(&cdc_mclk_mutex);
+	return r;
 }
 
 static int msm8930_mclk_event(struct snd_soc_dapm_widget *w,
@@ -1301,6 +1313,7 @@ static int __init msm8930_audio_init(void)
 	} else
 		msm8930_headset_gpios_configured = 1;
 
+	mutex_init(&cdc_mclk_mutex);
 	return ret;
 
 }
@@ -1315,6 +1328,7 @@ static void __exit msm8930_audio_exit(void)
 	msm8930_free_headset_mic_gpios();
 	platform_device_unregister(msm8930_snd_device);
 	kfree(mbhc_cfg.calibration);
+	mutex_destroy(&cdc_mclk_mutex);
 }
 module_exit(msm8930_audio_exit);
 

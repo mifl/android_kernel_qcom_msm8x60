@@ -549,8 +549,8 @@ int wcd9xxx_close_slim_sch_rx(struct wcd9xxx *wcd9xxx, unsigned int *ch_num,
 			goto err;
 		}
 		grph = rx[idx].grph;
-		pr_debug("%s: ch_num[%d] %d, idx %d, sph[%d] %x, grph %x\n",
-			 __func__, i, ch_num[i], idx, i, sph[i], grph);
+		pr_debug("%s: ch_num[%d] %d, idx %d, grph %x\n",
+			 __func__, i, ch_num[i], idx, grph);
 	}
 
 	/* slim_control_ch (REMOVE) */
@@ -558,12 +558,6 @@ int wcd9xxx_close_slim_sch_rx(struct wcd9xxx *wcd9xxx, unsigned int *ch_num,
 	if (ret < 0) {
 		pr_err("%s: slim_control_ch failed ret[%d]\n", __func__, ret);
 		goto err;
-	}
-	/* slim_disconnect_port */
-	ret = slim_disconnect_ports(wcd9xxx->slim, sph, ch_cnt);
-	if (ret < 0) {
-		pr_err("%s: slim_disconnect_ports failed ret[%d]\n",
-			 __func__, ret);
 	}
 	for (i = 0; i < ch_cnt; i++) {
 		idx = (ch_num[i] - BASE_CH_NUM - sh_ch.rx_port_start_offset);
@@ -638,7 +632,7 @@ int wcd9xxx_disconnect_port(struct wcd9xxx *wcd9xxx, unsigned int *ch_num,
 		/* rx_tx will be 1 for rx, 0 for tx */
 		if (rx_tx) {
 			idx = (ch_num[i] - BASE_CH_NUM -
-				SB_PGD_OFFSET_OF_RX_SLAVE_DEV_PORTS - 1);
+				sh_ch.rx_port_start_offset);
 			if (idx < 0) {
 				pr_err("%s: Invalid index found for RX = %d\n",
 					__func__, idx);

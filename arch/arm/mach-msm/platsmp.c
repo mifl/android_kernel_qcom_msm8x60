@@ -109,18 +109,22 @@ static int __cpuinit krait_release_secondary(unsigned long base, int cpu)
 
 	writel_relaxed(0x109, base_ptr+0x04);
 	writel_relaxed(0x101, base_ptr+0x04);
+	mb();
 	ndelay(300);
 
 	writel_relaxed(0x121, base_ptr+0x04);
+	mb();
 	udelay(2);
 
-	writel_relaxed(0x020, base_ptr+0x04);
+	writel_relaxed(0x120, base_ptr+0x04);
+	mb();
 	udelay(2);
 
-	writel_relaxed(0x000, base_ptr+0x04);
+	writel_relaxed(0x100, base_ptr+0x04);
+	mb();
 	udelay(100);
 
-	writel_relaxed(0x080, base_ptr+0x04);
+	writel_relaxed(0x180, base_ptr+0x04);
 	mb();
 	iounmap(base_ptr);
 	return 0;
@@ -165,7 +169,8 @@ static int __cpuinit release_secondary(unsigned int cpu)
 		return krait_release_secondary_sim(0xf9088000, cpu);
 
 	if (cpu_is_msm8960() || cpu_is_msm8930() || cpu_is_msm8930aa() ||
-	    cpu_is_apq8064() || cpu_is_msm8627() || cpu_is_msm8960ab())
+	    cpu_is_apq8064() || cpu_is_msm8627() || cpu_is_msm8960ab() ||
+            cpu_is_apq8064ab())
 		return krait_release_secondary(0x02088000, cpu);
 
 	if (cpu_is_msm8974())

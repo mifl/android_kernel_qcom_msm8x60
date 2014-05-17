@@ -70,6 +70,9 @@ enum pm8921_chg_led_src_config {
  * @uvd_thresh_voltage:	the USB falling UVD threshold (mV) (PM8917 only)
  * @resume_voltage_delta:	the (mV) drop to wait for before resume charging
  *				after the battery has been fully charged
+ * @resume_charge_percent:	the % SOC the charger will drop to after the
+ *				battery is fully charged before resuming
+ *				charging.
  * @term_current:	the charger current (mA) at which EOC happens
  * @cool_temp:		the temperature (degC) at which the battery is
  *			considered cool charging current and voltage is reduced.
@@ -82,6 +85,7 @@ enum pm8921_chg_led_src_config {
  *			area
  * @max_bat_chg_current:	Max charge current of the battery in mA
  *				Usually 70% of full charge capacity
+ * @usb_max_current:		Maximum USB current in mA
  * @cool_bat_chg_current:	chg current (mA) when the battery is cool
  * @warm_bat_chg_current:	chg current (mA)  when the battery is warm
  * @cool_bat_voltage:		chg voltage (mV) when the battery is cool
@@ -129,11 +133,13 @@ struct pm8921_charger_platform_data {
 	unsigned int			min_voltage;
 	unsigned int			uvd_thresh_voltage;
 	unsigned int			resume_voltage_delta;
+	int				resume_charge_percent;
 	unsigned int			term_current;
 	int				cool_temp;
 	int				warm_temp;
 	unsigned int			temp_check_period;
 	unsigned int			max_bat_chg_current;
+	unsigned int			usb_max_current;
 	unsigned int			cool_bat_chg_current;
 	unsigned int			warm_bat_chg_current;
 	unsigned int			cool_bat_voltage;

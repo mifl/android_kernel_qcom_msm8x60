@@ -168,6 +168,16 @@ static void msm_cam_v4l2_subdev_notify(struct v4l2_subdev *sd,
 		return;
 }
 
+static void msm_send_error_evt(int evt_type)
+{
+	struct v4l2_event v4l2_ev;
+
+	v4l2_ev.id = 0;
+	v4l2_ev.type = evt_type;
+	ktime_get_ts(&v4l2_ev.timestamp);
+	v4l2_event_queue(g_server_dev.pcam_active->pvdev, &v4l2_ev);
+}
+
 static int msm_ctrl_cmd_done(void *arg)
 {
 	void __user *uptr;
@@ -193,6 +203,13 @@ static int msm_ctrl_cmd_done(void *arg)
 					   sizeof(struct msm_ctrl_cmd))) {
 		pr_err("%s: copy_from_user failed, size=%d\n",
 			   __func__, sizeof(struct msm_ctrl_cmd));
+		goto ctrl_cmd_done_error;
+	}
+
+	if(command->queue_idx < 0 ||
+		command->queue_idx >= MAX_NUM_ACTIVE_CAMERA) {
+		pr_err("%s: Invalid value OR index %d\n", __func__,
+		command->queue_idx);
 		goto ctrl_cmd_done_error;
 	}
 
@@ -226,7 +243,7 @@ static int msm_ctrl_cmd_done(void *arg)
 				max_control_command_size);
 			goto ctrl_cmd_done_error;
 		}
-		if (copy_from_user(command->value, uptr, command->length)) {
+		if (copy_from_user(command->value, (void __user *)uptr, command->length)) {
 			pr_err("%s: copy_from_user failed, size=%d\n",
 			__func__, sizeof(struct msm_ctrl_cmd));
 			goto ctrl_cmd_done_error;
@@ -276,7 +293,7 @@ static int msm_server_control(struct msm_cam_server_dev *server_dev,
 	struct msm_device_queue *queue =
 		&server_dev->server_queue[out->queue_idx].ctrl_q;
 	struct msm_cam_v4l2_device *pcam = server_dev->pcam_active;
-
+	int wait_count;
 	struct v4l2_event v4l2_evt;
 	struct msm_isp_event_ctrl *isp_event;
 	void *ctrlcmd_data;
@@ -337,9 +354,17 @@ static int msm_server_control(struct msm_cam_server_dev *server_dev,
 
 	/* wait for config return status */
 	D("Waiting for config status\n");
-	rc = wait_event_interruptible_timeout(queue->wait,
-		!list_empty_careful(&queue->list),
-		msecs_to_jiffies(out->timeout_ms));
+	wait_count = 2;
+	do {
+		rc = wait_event_interruptible_timeout(queue->wait,
+                        !list_empty_careful(&queue->list),
+                        msecs_to_jiffies(out->timeout_ms));
+		wait_count--;
+		if (rc != -ERESTARTSYS)
+			break;
+		printk("%s: wait_event interrupted by signal, remain_count = %d",
+                        __func__, wait_count);
+         }while (wait_count > 0);
 	D("Waiting is over for config status\n");
 	if (list_empty_careful(&queue->list)) {
 		if (!rc)
@@ -1725,12 +1750,18 @@ int msm_server_send_ctrl(struct msm_ctrl_cmd *out,
 	struct msm_queue_cmd *event_qcmd;
 	struct msm_ctrl_cmd *ctrlcmd;
 	struct msm_cam_server_dev *server_dev = &g_server_dev;
-	struct msm_device_queue *queue =
-		&server_dev->server_queue[out->queue_idx].ctrl_q;
+	struct msm_device_queue *queue;
+
 
 	struct v4l2_event v4l2_evt;
 	struct msm_isp_event_ctrl *isp_event;
 	void *ctrlcmd_data;
+
+	if(out->queue_idx < 0 || out->queue_idx >= MAX_NUM_ACTIVE_CAMERA) {
+		pr_err("%s: Invalid index %d\n", __func__, out->queue_idx);
+		return -EINVAL;
+	}
+	queue = &server_dev->server_queue[out->queue_idx].ctrl_q;
 
 	event_qcmd = kzalloc(sizeof(struct msm_queue_cmd), GFP_KERNEL);
 	if (!event_qcmd) {
@@ -2525,14 +2556,9 @@ static int msm_close_server(struct file *fp)
 	if (g_server_dev.use_count == 0) {
 		mutex_lock(&g_server_dev.server_lock);
 		if (g_server_dev.pcam_active) {
-			struct v4l2_event v4l2_ev;
 			msm_cam_stop_hardware(g_server_dev.pcam_active);
-			v4l2_ev.type = V4L2_EVENT_PRIVATE_START
-				+ MSM_CAM_APP_NOTIFY_ERROR_EVENT;
-			v4l2_ev.id = 0;
-			ktime_get_ts(&v4l2_ev.timestamp);
-			v4l2_event_queue(
-				g_server_dev.pcam_active->pvdev, &v4l2_ev);
+			msm_send_error_evt(V4L2_EVENT_PRIVATE_START
+				+ MSM_CAM_APP_NOTIFY_ERROR_EVENT);
 		}
 		sub.type = V4L2_EVENT_ALL;
 		msm_server_v4l2_unsubscribe_event(
@@ -2734,12 +2760,6 @@ static long msm_ioctl_config(struct file *fp, unsigned int cmd,
 		rc = msm_v4l2_evt_notify(config_cam->p_mctl, cmd, arg);
 		break;
 
-	case MSM_CAM_IOCTL_SET_MEM_MAP_INFO:
-		if (copy_from_user(&config_cam->mem_map, (void __user *)arg,
-				sizeof(struct msm_mem_map_info)))
-			rc = -EINVAL;
-		break;
-
 	default:{
 		/* For the rest of config command, forward to media controller*/
 		struct msm_cam_media_controller *p_mctl = config_cam->p_mctl;
@@ -2756,39 +2776,6 @@ static long msm_ioctl_config(struct file *fp, unsigned int cmd,
 	return rc;
 }
 
-static int msm_mmap_config(struct file *fp, struct vm_area_struct *vma)
-{
-	struct msm_cam_config_dev *config_cam = fp->private_data;
-	int rc = 0;
-	int phyaddr;
-	int retval;
-	unsigned long size;
-
-	D("%s: phy_addr=0x%x", __func__, config_cam->mem_map.cookie);
-	phyaddr = (int)config_cam->mem_map.cookie;
-	if (!phyaddr) {
-		pr_err("%s: no physical memory to map", __func__);
-		return -EFAULT;
-	}
-	memset(&config_cam->mem_map, 0,
-		sizeof(struct msm_mem_map_info));
-	size = vma->vm_end - vma->vm_start;
-	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
-	retval = remap_pfn_range(vma, vma->vm_start,
-					phyaddr >> PAGE_SHIFT,
-					size, vma->vm_page_prot);
-	if (retval) {
-		pr_err("%s: remap failed, rc = %d",
-					__func__, retval);
-		rc = -ENOMEM;
-		goto end;
-	}
-	D("%s: phy_addr=0x%x: %08lx-%08lx, pgoff %08lx\n",
-			__func__, (uint32_t)phyaddr,
-			vma->vm_start, vma->vm_end, vma->vm_pgoff);
-end:
-	return rc;
-}
 
 static int msm_open_config(struct inode *inode, struct file *fp)
 {
@@ -2882,7 +2869,6 @@ static const struct file_operations msm_fops_config = {
 	.open  = msm_open_config,
 	.poll  = msm_poll_config,
 	.unlocked_ioctl = msm_ioctl_config,
-	.mmap	= msm_mmap_config,
 	.release = msm_close_config,
 };
 
@@ -3047,6 +3033,10 @@ static void msm_cam_server_subdev_notify(struct v4l2_subdev *sd,
 	case NOTIFY_GESTURE_CAM_EVT:
 		rc = v4l2_subdev_call(g_server_dev.gesture_device,
 			core, ioctl, VIDIOC_MSM_GESTURE_CAM_EVT, arg);
+		break;
+	case NOTIFY_VFE_CAMIF_ERROR:
+		msm_send_error_evt(V4L2_EVENT_PRIVATE_START +
+			MSM_CAM_APP_NOTIFY_ERROR_EVENT);
 		break;
 	default:
 		break;

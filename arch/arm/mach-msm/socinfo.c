@@ -280,6 +280,9 @@ static enum msm_cpu cpu_of_id[] = {
 	[143] = MSM_CPU_8930AA,
 	[144] = MSM_CPU_8930AA,
 
+	/* 8064AB IDs */
+	[153] = MSM_CPU_8064AB,
+
 	/* Uninitialized IDs are not known to run Linux.
 	   MSM_CPU_UNKNOWN is set to 0 to ensure these IDs are
 	   considered as unknown CPU. */
@@ -920,6 +923,20 @@ const int cpu_is_krait_v2(void)
 	case 0x510F06F0:
 	case 0x510F06F1:
 	case 0x510F06F2:
+		return 1;
+
+	default:
+		return 0;
+	};
+}
+
+const int cpu_is_krait_v3(void)
+{
+	switch (read_cpuid_id()) {
+	case 0x512F04D0:
+	case 0x511F06F0:
+	case 0x511F06F1:
+	case 0x510F05D0:
 		return 1;
 
 	default:

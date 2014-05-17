@@ -50,6 +50,8 @@
 #include "scm-pas.h"
 #include <mach/msm_dcvs.h>
 #include <mach/iommu_domains.h>
+#include <mach/msm_xo.h>
+#include <mach/socinfo.h>
 
 #ifdef CONFIG_MSM_MPM
 #include <mach/mpm.h>
@@ -717,7 +719,7 @@ static struct msm_bus_paths vidc_bus_client_config[] = {
 	},
 	{
 		ARRAY_SIZE(vidc_venc_1080p_turbo_vectors),
-		vidc_vdec_1080p_turbo_vectors,
+		vidc_venc_1080p_turbo_vectors,
 	},
 	{
 		ARRAY_SIZE(vidc_vdec_1080p_turbo_vectors),
@@ -727,6 +729,286 @@ static struct msm_bus_paths vidc_bus_client_config[] = {
 
 static struct msm_bus_scale_pdata vidc_bus_client_data = {
 	vidc_bus_client_config,
+	ARRAY_SIZE(vidc_bus_client_config),
+	.name = "vidc",
+};
+
+static struct msm_bus_vectors vidc_pro_init_vectors[] = {
+	{
+		.src = MSM_BUS_MASTER_VIDEO_ENC,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 0,
+		.ib  = 0,
+	},
+	{
+		.src = MSM_BUS_MASTER_VIDEO_DEC,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 0,
+		.ib  = 0,
+	},
+	{
+		.src = MSM_BUS_MASTER_AMPSS_M0,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab = 0,
+		.ib = 0,
+	},
+	{
+		.src = MSM_BUS_MASTER_AMPSS_M0,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab = 0,
+		.ib = 0,
+	},
+};
+static struct msm_bus_vectors vidc_pro_venc_vga_vectors[] = {
+	{
+		.src = MSM_BUS_MASTER_VIDEO_ENC,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 54525952,
+		.ib  = 436207616,
+	},
+	{
+		.src = MSM_BUS_MASTER_VIDEO_DEC,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 72351744,
+		.ib  = 289406976,
+	},
+	{
+		.src = MSM_BUS_MASTER_AMPSS_M0,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 500000,
+		.ib  = 1000000,
+	},
+	{
+		.src = MSM_BUS_MASTER_AMPSS_M0,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 500000,
+		.ib  = 1000000,
+	},
+};
+static struct msm_bus_vectors vidc_pro_vdec_vga_vectors[] = {
+	{
+		.src = MSM_BUS_MASTER_VIDEO_ENC,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 40894464,
+		.ib  = 327155712,
+	},
+	{
+		.src = MSM_BUS_MASTER_VIDEO_DEC,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 48234496,
+		.ib  = 192937984,
+	},
+	{
+		.src = MSM_BUS_MASTER_AMPSS_M0,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 500000,
+		.ib  = 2000000,
+	},
+	{
+		.src = MSM_BUS_MASTER_AMPSS_M0,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 500000,
+		.ib  = 2000000,
+	},
+};
+static struct msm_bus_vectors vidc_pro_venc_720p_vectors[] = {
+	{
+		.src = MSM_BUS_MASTER_VIDEO_ENC,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 163577856,
+		.ib  = 1308622848,
+	},
+	{
+		.src = MSM_BUS_MASTER_VIDEO_DEC,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 219152384,
+		.ib  = 876609536,
+	},
+	{
+		.src = MSM_BUS_MASTER_AMPSS_M0,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 1750000,
+		.ib  = 3500000,
+	},
+	{
+		.src = MSM_BUS_MASTER_AMPSS_M0,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 1750000,
+		.ib  = 3500000,
+	},
+};
+static struct msm_bus_vectors vidc_pro_vdec_720p_vectors[] = {
+	{
+		.src = MSM_BUS_MASTER_VIDEO_ENC,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 121634816,
+		.ib  = 973078528,
+	},
+	{
+		.src = MSM_BUS_MASTER_VIDEO_DEC,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 155189248,
+		.ib  = 620756992,
+	},
+	{
+		.src = MSM_BUS_MASTER_AMPSS_M0,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 1750000,
+		.ib  = 7000000,
+	},
+	{
+		.src = MSM_BUS_MASTER_AMPSS_M0,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 1750000,
+		.ib  = 7000000,
+	},
+};
+static struct msm_bus_vectors vidc_pro_venc_1080p_vectors[] = {
+	{
+		.src = MSM_BUS_MASTER_VIDEO_ENC,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 372244480,
+		.ib  = 2560000000U,
+	},
+	{
+		.src = MSM_BUS_MASTER_VIDEO_DEC,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 501219328,
+		.ib  = 2560000000U,
+	},
+	{
+		.src = MSM_BUS_MASTER_AMPSS_M0,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 2500000,
+		.ib  = 5000000,
+	},
+	{
+		.src = MSM_BUS_MASTER_AMPSS_M0,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 2500000,
+		.ib  = 5000000,
+	},
+};
+static struct msm_bus_vectors vidc_pro_vdec_1080p_vectors[] = {
+	{
+		.src = MSM_BUS_MASTER_VIDEO_ENC,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 222298112,
+		.ib  = 2560000000U,
+	},
+	{
+		.src = MSM_BUS_MASTER_VIDEO_DEC,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 330301440,
+		.ib  = 2560000000U,
+	},
+	{
+		.src = MSM_BUS_MASTER_AMPSS_M0,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 2500000,
+		.ib  = 700000000,
+	},
+	{
+		.src = MSM_BUS_MASTER_AMPSS_M0,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 2500000,
+		.ib  = 10000000,
+	},
+};
+static struct msm_bus_vectors vidc_pro_venc_1080p_turbo_vectors[] = {
+	{
+		.src = MSM_BUS_MASTER_VIDEO_ENC,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 222298112,
+		.ib  = 3522000000U,
+	},
+	{
+		.src = MSM_BUS_MASTER_VIDEO_DEC,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 330301440,
+		.ib  = 3522000000U,
+	},
+	{
+		.src = MSM_BUS_MASTER_AMPSS_M0,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 2500000,
+		.ib  = 700000000,
+	},
+	{
+		.src = MSM_BUS_MASTER_AMPSS_M0,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 2500000,
+		.ib  = 10000000,
+	},
+};
+static struct msm_bus_vectors vidc_pro_vdec_1080p_turbo_vectors[] = {
+	{
+		.src = MSM_BUS_MASTER_VIDEO_ENC,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 222298112,
+		.ib  = 3522000000U,
+	},
+	{
+		.src = MSM_BUS_MASTER_VIDEO_DEC,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 330301440,
+		.ib  = 3522000000U,
+	},
+	{
+		.src = MSM_BUS_MASTER_AMPSS_M0,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 2500000,
+		.ib  = 700000000,
+	},
+	{
+		.src = MSM_BUS_MASTER_AMPSS_M0,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 2500000,
+		.ib  = 10000000,
+	},
+};
+
+static struct msm_bus_paths vidc_pro_bus_client_config[] = {
+	{
+		ARRAY_SIZE(vidc_pro_init_vectors),
+		vidc_pro_init_vectors,
+	},
+	{
+		ARRAY_SIZE(vidc_pro_venc_vga_vectors),
+		vidc_pro_venc_vga_vectors,
+	},
+	{
+		ARRAY_SIZE(vidc_pro_vdec_vga_vectors),
+		vidc_pro_vdec_vga_vectors,
+	},
+	{
+		ARRAY_SIZE(vidc_pro_venc_720p_vectors),
+		vidc_pro_venc_720p_vectors,
+	},
+	{
+		ARRAY_SIZE(vidc_pro_vdec_720p_vectors),
+		vidc_pro_vdec_720p_vectors,
+	},
+	{
+		ARRAY_SIZE(vidc_pro_venc_1080p_vectors),
+		vidc_pro_venc_1080p_vectors,
+	},
+	{
+		ARRAY_SIZE(vidc_pro_vdec_1080p_vectors),
+		vidc_pro_vdec_1080p_vectors,
+	},
+	{
+		ARRAY_SIZE(vidc_pro_venc_1080p_turbo_vectors),
+		vidc_pro_venc_1080p_turbo_vectors,
+	},
+	{
+		ARRAY_SIZE(vidc_vdec_1080p_turbo_vectors),
+		vidc_pro_vdec_1080p_turbo_vectors,
+	},
+};
+
+static struct msm_bus_scale_pdata vidc_pro_bus_client_data = {
+	vidc_pro_bus_client_config,
 	ARRAY_SIZE(vidc_bus_client_config),
 	.name = "vidc",
 };
@@ -1087,6 +1369,8 @@ static struct pil_q6v4_pdata msm_8960_q6_mss_fw_data = {
 	.strap_ahb_lower = 0x00000080,
 	.aclk_reg = SFAB_MSS_Q6_FW_ACLK_CTL,
 	.jtag_clk_reg = MSS_Q6FW_JTAG_CLK_CTL,
+	.xo1_id = MSM_XO_TCXO_A0,
+	.xo2_id = MSM_XO_TCXO_A1,
 	.name = "modem_fw",
 	.depends = "q6",
 	.pas_id = PAS_MODEM_FW,
@@ -2153,6 +2437,17 @@ static struct fs_driver_data gfx3d_fs_data = {
 	.bus_port0 = MSM_BUS_MASTER_GRAPHICS_3D,
 };
 
+static struct fs_driver_data gfx3d_fs_data_8960ab = {
+	.clks = (struct fs_clk_data[]){
+		{ .name = "core_clk", .reset_rate = 27000000 },
+		{ .name = "iface_clk" },
+		{ .name = "bus_clk" },
+		{ 0 }
+	},
+	.bus_port0 = MSM_BUS_MASTER_GRAPHICS_3D,
+	.bus_port1 = MSM_BUS_MASTER_GRAPHICS_3D_PORT1,
+};
+
 static struct fs_driver_data ijpeg_fs_data = {
 	.clks = (struct fs_clk_data[]){
 		{ .name = "core_clk" },
@@ -2201,6 +2496,17 @@ static struct fs_driver_data ved_fs_data = {
 	.bus_port1 = MSM_BUS_MASTER_HD_CODEC_PORT1,
 };
 
+static struct fs_driver_data ved_fs_data_8960ab = {
+	.clks = (struct fs_clk_data[]){
+		{ .name = "core_clk" },
+		{ .name = "iface_clk" },
+		{ .name = "bus_clk" },
+		{ 0 }
+	},
+	.bus_port0 = MSM_BUS_MASTER_VIDEO_DEC,
+	.bus_port1 = MSM_BUS_MASTER_VIDEO_ENC,
+};
+
 static struct fs_driver_data vfe_fs_data = {
 	.clks = (struct fs_clk_data[]){
 		{ .name = "core_clk" },
@@ -2233,6 +2539,17 @@ struct platform_device *msm8960_footswitch[] __initdata = {
 	FS_8X60(FS_VED,    "vdd",	"msm_vidc.0",	&ved_fs_data),
 };
 unsigned msm8960_num_footswitch __initdata = ARRAY_SIZE(msm8960_footswitch);
+
+struct platform_device *msm8960ab_footswitch[] __initdata = {
+	FS_8X60(FS_MDP,    "vdd",	"mdp.0",	&mdp_fs_data),
+	FS_8X60(FS_ROT,    "vdd",	"msm_rotator.0", &rot_fs_data),
+	FS_8X60(FS_IJPEG,  "vdd",	"msm_gemini.0",	&ijpeg_fs_data),
+	FS_8X60(FS_VFE,    "vdd",	"msm_vfe.0",	&vfe_fs_data),
+	FS_8X60(FS_VPE,    "vdd",	"msm_vpe.0",	&vpe_fs_data),
+	FS_8X60(FS_GFX3D,  "vdd",	"kgsl-3d0.0",	&gfx3d_fs_data_8960ab),
+	FS_8X60(FS_VED,    "vdd",	"msm_vidc.0",	&ved_fs_data_8960ab),
+};
+unsigned msm8960ab_num_footswitch __initdata = ARRAY_SIZE(msm8960ab_footswitch);
 
 #ifdef CONFIG_MSM_ROTATOR
 static struct msm_bus_vectors rotator_init_vectors[] = {
@@ -2864,17 +3181,28 @@ static struct resource kgsl_3d0_resources[] = {
 	},
 };
 
-static const struct kgsl_iommu_ctx kgsl_3d0_iommu_ctxs[] = {
+static const struct kgsl_iommu_ctx kgsl_3d0_iommu0_ctxs[] = {
 	{ "gfx3d_user", 0 },
 	{ "gfx3d_priv", 1 },
 };
 
+static const struct kgsl_iommu_ctx kgsl_3d0_iommu1_ctxs[] = {
+	{ "gfx3d1_user", 0 },
+	{ "gfx3d1_priv", 1 },
+};
+
 static struct kgsl_device_iommu_data kgsl_3d0_iommu_data[] = {
 	{
-		.iommu_ctxs = kgsl_3d0_iommu_ctxs,
-		.iommu_ctx_count = ARRAY_SIZE(kgsl_3d0_iommu_ctxs),
+		.iommu_ctxs = kgsl_3d0_iommu0_ctxs,
+		.iommu_ctx_count = ARRAY_SIZE(kgsl_3d0_iommu0_ctxs),
 		.physstart = 0x07C00000,
 		.physend = 0x07C00000 + SZ_1M - 1,
+	},
+	{
+		.iommu_ctxs = kgsl_3d0_iommu1_ctxs,
+		.iommu_ctx_count = ARRAY_SIZE(kgsl_3d0_iommu1_ctxs),
+		.physstart = 0x07D00000,
+		.physend = 0x07D00000 + SZ_1M - 1,
 	},
 };
 
@@ -3376,8 +3704,8 @@ struct platform_device msm8960_rpm_log_device = {
 };
 
 static struct msm_rpmstats_platform_data msm_rpm_stat_pdata = {
-	.phys_addr_base = 0x0010D204,
-	.phys_size = SZ_8K,
+	.phys_addr_base = 0x0010DD04,
+	.phys_size = SZ_256,
 };
 
 struct platform_device msm8960_rpm_stat_device = {
@@ -4049,3 +4377,19 @@ struct platform_device mdm_sglte_device = {
 	.num_resources	= ARRAY_SIZE(sglte_resources),
 	.resource	= sglte_resources,
 };
+
+struct platform_device *msm8960_vidc_device[] __initdata = {
+	&msm_device_vidc
+};
+
+void __init msm8960_add_vidc_device(void)
+{
+	if (cpu_is_msm8960ab()) {
+		struct msm_vidc_platform_data *pdata;
+		pdata = (struct msm_vidc_platform_data *)
+			msm_device_vidc.dev.platform_data;
+		pdata->vidc_bus_client_pdata = &vidc_pro_bus_client_data;
+	}
+	platform_add_devices(msm8960_vidc_device,
+		ARRAY_SIZE(msm8960_vidc_device));
+}

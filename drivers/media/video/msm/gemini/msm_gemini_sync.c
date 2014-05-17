@@ -21,6 +21,7 @@
 #include "msm_gemini_platform.h"
 #include "msm_gemini_common.h"
 
+#  define UINT32_MAX    (4294967295U)
 static int release_buf;
 
 /*************** queue helper ****************/
@@ -484,10 +485,12 @@ int msm_gemini_input_buf_enqueue(struct msm_gemini_device *pgmn_dev,
 	} else {
 	buf_p->y_buffer_addr    = msm_gemini_platform_v2p(buf_cmd.fd,
 		buf_cmd.y_len + buf_cmd.cbcr_len, &buf_p->file,
-		&buf_p->handle)	+ buf_cmd.offset;
+		&buf_p->handle)	+ buf_cmd.offset + buf_cmd.y_off;
 	}
 	buf_p->y_len          = buf_cmd.y_len;
-	buf_p->cbcr_buffer_addr = buf_p->y_buffer_addr + buf_cmd.y_len;
+
+	buf_p->cbcr_buffer_addr = buf_p->y_buffer_addr + buf_cmd.y_len +
+					buf_cmd.cbcr_off;
 	buf_p->cbcr_len       = buf_cmd.cbcr_len;
 	buf_p->num_of_mcu_rows = buf_cmd.num_of_mcu_rows;
 	GMN_DBG("%s: y_addr=%x,y_len=%x,cbcr_addr=%x,cbcr_len=%x\n", __func__,
@@ -635,7 +638,7 @@ int msm_gemini_ioctl_hw_cmds(struct msm_gemini_device *pgmn_dev,
 	void * __user arg)
 {
 	int is_copy_to_user;
-	int len;
+	uint32_t len;
 	uint32_t m;
 	struct msm_gemini_hw_cmds *hw_cmds_p;
 	struct msm_gemini_hw_cmd *hw_cmd_p;
@@ -643,6 +646,12 @@ int msm_gemini_ioctl_hw_cmds(struct msm_gemini_device *pgmn_dev,
 	if (copy_from_user(&m, arg, sizeof(m))) {
 		GMN_PR_ERR("%s:%d] failed\n", __func__, __LINE__);
 		return -EFAULT;
+	}
+	if ((m == 0) || (m > ((UINT32_MAX-sizeof(struct msm_gemini_hw_cmds))/
+		sizeof(struct msm_gemini_hw_cmd)))) {
+		GMN_PR_ERR("%s:%d] outof range of hwcmds\n",
+			 __func__, __LINE__);
+		return -EINVAL;
 	}
 
 	len = sizeof(struct msm_gemini_hw_cmds) +

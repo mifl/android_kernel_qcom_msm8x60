@@ -570,7 +570,12 @@ static void vfe_7x_ops(void *driver_data, unsigned id, size_t len,
 				kfree(data);
 				return;
 			}
-			free_buf = vfe2x_check_free_buffer(
+			if (vfe2x_ctrl->liveshot_enabled)
+				free_buf = vfe2x_check_free_buffer(
+					VFE_MSG_OUTPUT_IRQ,
+					VFE_MSG_V2X_LIVESHOT_PRIMARY);
+			else
+				free_buf = vfe2x_check_free_buffer(
 					VFE_MSG_OUTPUT_IRQ,
 					VFE_MSG_OUTPUT_PRIMARY);
 			CDBG("free_buf = %x\n",
@@ -1086,12 +1091,14 @@ static struct msm_free_buf *vfe2x_check_free_buffer(int id, int path)
 
 	vfe2x_subdev_notify(id, path);
 	if (op_mode & SNAPSHOT_MASK_MODE) {
-		if (path == VFE_MSG_OUTPUT_PRIMARY)
+		if (path == VFE_MSG_OUTPUT_PRIMARY ||
+				path == VFE_MSG_V2X_LIVESHOT_PRIMARY)
 			outch = &vfe2x_ctrl->snap;
 		else if (path == VFE_MSG_OUTPUT_SECONDARY)
 			outch = &vfe2x_ctrl->thumb;
 	} else {
-		if (path == VFE_MSG_OUTPUT_PRIMARY) {
+		if (path == VFE_MSG_OUTPUT_PRIMARY ||
+				path == VFE_MSG_V2X_LIVESHOT_PRIMARY) {
 			if (vfe2x_ctrl->zsl_mode)
 				outch = &vfe2x_ctrl->zsl_prim;
 			else
@@ -1113,12 +1120,14 @@ static int vfe2x_configure_pingpong_buffers(int id, int path)
 	vfe2x_subdev_notify(id, path);
 	CDBG("Opmode = %d\n", op_mode);
 	if (op_mode & SNAPSHOT_MASK_MODE) {
-		if (path == VFE_MSG_OUTPUT_PRIMARY)
+		if (path == VFE_MSG_OUTPUT_PRIMARY ||
+				path == VFE_MSG_V2X_LIVESHOT_PRIMARY)
 			outch = &vfe2x_ctrl->snap;
 		else if (path == VFE_MSG_OUTPUT_SECONDARY)
 			outch = &vfe2x_ctrl->thumb;
 	} else {
-		if (path == VFE_MSG_OUTPUT_PRIMARY) {
+		if (path == VFE_MSG_OUTPUT_PRIMARY ||
+				path == VFE_MSG_V2X_LIVESHOT_PRIMARY) {
 			if (vfe2x_ctrl->zsl_mode)
 				outch = &vfe2x_ctrl->zsl_prim;
 			else
@@ -1146,10 +1155,12 @@ static struct buf_info *vfe2x_get_ch(int path)
 	if (op_mode & SNAPSHOT_MASK_MODE) {
 		if (path == VFE_MSG_OUTPUT_SECONDARY)
 			ch = &vfe2x_ctrl->thumb;
-		else if (path == VFE_MSG_OUTPUT_PRIMARY)
+		else if (path == VFE_MSG_OUTPUT_PRIMARY ||
+					path == VFE_MSG_V2X_LIVESHOT_PRIMARY)
 			ch = &vfe2x_ctrl->snap;
 	} else {
-		if (path == VFE_MSG_OUTPUT_PRIMARY) {
+		if (path == VFE_MSG_OUTPUT_PRIMARY ||
+					path == VFE_MSG_V2X_LIVESHOT_PRIMARY) {
 			if (vfe2x_ctrl->zsl_mode)
 				ch = &vfe2x_ctrl->zsl_prim;
 			else
@@ -1283,6 +1294,12 @@ static long msm_vfe_subdev_ioctl(struct v4l2_subdev *sd,
 			rc = -ENOMEM;
 			goto config_failure;
 		}
+		if (vfecmd.length > sizeof(struct vfe_stats_we_cfg) - 4) {
+			pr_err("%s: Invalid command length %d\n", __func__,
+				(vfecmd.length));
+			rc = -EINVAL;
+			goto config_done;
+		}
 
 		if (copy_from_user((char *)scfg + 4,
 					(void __user *)(vfecmd.value),
@@ -1339,6 +1356,12 @@ static long msm_vfe_subdev_ioctl(struct v4l2_subdev *sd,
 		if (!sfcfg) {
 			rc = -ENOMEM;
 			goto config_failure;
+		}
+		if (vfecmd.length > sizeof(struct vfe_stats_af_cfg) - 4) {
+			pr_err("%s: Invalid command length %d\n", __func__,
+				(vfecmd.length));
+			rc = -EINVAL;
+			goto config_done;
 		}
 
 		if (copy_from_user((char *)sfcfg + 4,

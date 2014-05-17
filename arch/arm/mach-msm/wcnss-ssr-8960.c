@@ -161,9 +161,12 @@ static int riva_powerup(const struct subsys_desc *subsys)
 	return ret;
 }
 
-/* 5MB RAM segments for Riva SS */
-static struct ramdump_segment riva_segments[] = {{0x8f200000,
-						0x8f700000 - 0x8f200000} };
+/* 7MB RAM segments for Riva SS;
+ * Riva 1.1 0x8f000000 - 0x8f700000
+ * Riva 1.0 0x8f200000 - 0x8f700000
+ */
+static struct ramdump_segment riva_segments[] = {{0x8f000000,
+						0x8f700000 - 0x8f000000} };
 
 static int riva_ramdump(int enable, const struct subsys_desc *subsys)
 {
@@ -190,7 +193,7 @@ static void riva_crash_shutdown(const struct subsys_desc *subsys)
 }
 
 static struct subsys_desc riva_8960 = {
-	.name = "riva",
+	.name = "wcnss",
 	.shutdown = riva_shutdown,
 	.powerup = riva_powerup,
 	.ramdump = riva_ramdump,
