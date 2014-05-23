@@ -5027,10 +5027,6 @@ static void msmsdcc_dump_sdcc_state(struct msmsdcc_host *host)
 		pr_err("%s: SPS BAM reset failed: sps reset_bam=%d\n",
 			mmc_hostname(host->mmc), host->sps.reset_bam);
 
-	if (host->sps.reset_bam)
-		pr_err("%s: SPS BAM reset failed: sps reset_bam=%d\n",
-			mmc_hostname(host->mmc), host->sps.reset_bam);
-
 	pr_err("%s: got_dataend=%d, prog_enable=%d,"
 		" wait_for_auto_prog_done=%d, got_auto_prog_done=%d,"
 		" req_tout_ms=%d\n", mmc_hostname(host->mmc),
