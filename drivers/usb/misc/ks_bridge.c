@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -389,6 +389,8 @@ static const struct usb_device_id ksb_usb_ids[] = {
 	.driver_info = (unsigned long)&ksb_efs_dev, },
 	{ USB_DEVICE(0x5c6, 0x904C),
 	.driver_info = (unsigned long)&ksb_efs_dev, },
+	{ USB_DEVICE(0x5c6, 0x9075),
+	.driver_info = (unsigned long)&ksb_efs_dev, },
 
 	{} /* terminating entry */
 };
@@ -551,6 +553,7 @@ ksb_usb_probe(struct usb_interface *ifc, const struct usb_device_id *id)
 		break;
 	case 0x9048:
 	case 0x904C:
+	case 0x9075:
 		if (ifc_num != 2)
 			return -ENODEV;
 		ksb = __ksb[EFS_BRIDGE_INDEX];
