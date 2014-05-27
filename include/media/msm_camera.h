@@ -237,6 +237,9 @@
 #define MSM_CAM_IOCTL_AXI_RELEASE \
 	_IO(MSM_CAM_IOCTL_MAGIC, 67)
 
+#define MSM_CAM_IOCTL_CHROMATIX_PARMS \
+	_IOWR(MSM_CAM_IOCTL_MAGIC, 68, struct chromatix_params)
+
 struct v4l2_event_and_payload {
 	struct v4l2_event evt;
 	uint32_t payload_length;
@@ -284,7 +287,7 @@ struct msm_mctl_post_proc_cmd {
 #define MAX_ACTUATOR_INIT_SET 12
 #define MAX_ACTUATOR_TYPE_SIZE 32
 #define MAX_ACTUATOR_REG_TBL_SIZE 8
-
+#define MAX_EEPROM_NAME 32
 
 #define MSM_MAX_CAMERA_CONFIGS 2
 
@@ -292,7 +295,8 @@ struct msm_mctl_post_proc_cmd {
 #define PP_RAW_SNAP ((0x01)<<1)
 #define PP_PREV  ((0x01)<<2)
 #define PP_THUMB ((0x01)<<3)
-#define PP_MASK		(PP_SNAP|PP_RAW_SNAP|PP_PREV|PP_THUMB)
+#define PP_RDI_PREV ((0x01)<<4)
+#define PP_MASK		(PP_SNAP|PP_RAW_SNAP|PP_PREV|PP_THUMB|PP_RDI_PREV)
 
 #define MSM_CAM_CTRL_CMD_DONE  0
 #define MSM_CAM_SENSOR_VFE_CMD 1
@@ -993,7 +997,10 @@ struct msm_snapshot_pp_status {
 #define CFG_CONFIG_VREG_ARRAY         52
 #define CFG_CONFIG_CLK_ARRAY          53
 #define CFG_GPIO_OP                   54
-#define CFG_MAX                       55
+#define CFG_EEPROM_DIRECT_DATA_READ   55
+#define CFG_EEPROM_DIRECT_DATA_WRITE  56
+#define CFG_EEPROM_DIRECT_DATA_ERASE  57
+#define CFG_MAX                       58
 
 
 #define MOVE_NEAR	0
@@ -1023,7 +1030,13 @@ struct msm_snapshot_pp_status {
 #define CAMERA_EFFECT_EMBOSS		9
 #define CAMERA_EFFECT_SKETCH		10
 #define CAMERA_EFFECT_NEON		11
-#define CAMERA_EFFECT_MAX		12
+#define CAMERA_EFFECT_FADED		12
+#define CAMERA_EFFECT_VINTAGECOOL	13
+#define CAMERA_EFFECT_VINTAGEWARM	14
+#define CAMERA_EFFECT_ACCENT_BLUE       15
+#define CAMERA_EFFECT_ACCENT_GREEN      16
+#define CAMERA_EFFECT_ACCENT_ORANGE     17
+#define CAMERA_EFFECT_MAX               18
 
 /* QRD */
 #define CAMERA_EFFECT_BW		10
@@ -1343,6 +1356,11 @@ struct mirror_flip {
 struct cord {
 	uint32_t x;
 	uint32_t y;
+};
+
+struct chromatix_params {
+	uint32_t chromatix_size;
+	uint8_t *chromatix;
 };
 
 struct msm_eeprom_data_t {
@@ -1676,6 +1694,7 @@ struct damping_params_t {
 enum actuator_type {
 	ACTUATOR_VCM,
 	ACTUATOR_PIEZO,
+	ACTUATOR_HALL_EFFECT,
 };
 
 enum msm_actuator_data_type {
@@ -1772,6 +1791,7 @@ enum af_camera_name {
 	ACTUATOR_WEB_CAM_0,
 	ACTUATOR_WEB_CAM_1,
 	ACTUATOR_WEB_CAM_2,
+	ACTUATOR_CAM_MAX,
 };
 
 struct msm_actuator_cfg_data {
@@ -1798,10 +1818,20 @@ struct msm_calib_wb {
 	uint16_t gr_over_gb;
 };
 
+struct msm_calib_wb_light_info {
+	uint8_t lightidx[10];
+	struct msm_calib_wb wb_light_info[3];
+};
+
 struct msm_calib_af {
 	uint16_t macro_dac;
 	uint16_t inf_dac;
 	uint16_t start_dac;
+	int16_t pan_dac;
+};
+
+struct msm_calib_module_info {
+	enum af_camera_name actuator_id;
 };
 
 struct msm_calib_lsc {
@@ -1809,6 +1839,11 @@ struct msm_calib_lsc {
 	uint16_t b_gain[221];
 	uint16_t gr_gain[221];
 	uint16_t gb_gain[221];
+};
+
+struct msm_calib_lsc_light_info {
+	uint8_t lightidx[10];
+	struct msm_calib_lsc lsc_light_info[3];
 };
 
 struct pixel_t {
@@ -1828,12 +1863,21 @@ struct msm_calib_raw {
 	uint32_t size;
 };
 
+struct eeprom_data_access_t {
+  uint8_t *data;
+  uint32_t addr;
+  uint32_t num_bytes;
+};
+
 struct msm_camera_eeprom_info_t {
 	struct msm_eeprom_support af;
 	struct msm_eeprom_support wb;
 	struct msm_eeprom_support lsc;
 	struct msm_eeprom_support dpc;
 	struct msm_eeprom_support raw;
+	struct msm_eeprom_support gld_wb;
+	struct msm_eeprom_support gld_lsc;
+	struct msm_eeprom_support mod_info;
 };
 
 struct msm_eeprom_cfg_data {
@@ -1842,6 +1886,7 @@ struct msm_eeprom_cfg_data {
 	union {
 		struct msm_eeprom_data_t get_data;
 		struct msm_camera_eeprom_info_t get_info;
+		struct eeprom_data_access_t direct_access;
 	} cfg;
 };
 

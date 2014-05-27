@@ -86,7 +86,7 @@ struct pm8921_soc_params {
 struct pm8921_bms_chip {
 	struct device		*dev;
 	struct dentry		*dent;
-	unsigned int		r_sense;
+	int			r_sense_uohm;
 	unsigned int		v_cutoff;
 	unsigned int		fcc;
 	struct single_row_lut	*fcc_temp_lut;
@@ -126,7 +126,7 @@ struct pm8921_bms_chip {
 	int			default_rbatt_mohm;
 	int			amux_2_trim_delta;
 	uint16_t		prev_last_good_ocv_raw;
-	unsigned int		rconn_mohm;
+	int			rconn_mohm;
 	struct mutex		last_ocv_uv_mutex;
 	int			last_ocv_uv;
 	int			pon_ocv_uv;
@@ -500,15 +500,15 @@ static s64 cc_to_microvolt(struct pm8921_bms_chip *chip, s64 cc)
 #define SLEEP_CLK_HZ		32764
 #define SECONDS_PER_HOUR	3600
 /**
- * ccmicrovolt_to_nvh -
+ * ccmicrovolt_to_uvh -
  * @cc_uv:  coulumb counter converted to uV
  *
- * RETURNS:	coulumb counter based charge in nVh
- *		(nano Volt Hour)
+ * RETURNS:	coulumb counter based charge in uVh
+ *		(micro Volt Hour)
  */
-static s64 ccmicrovolt_to_nvh(s64 cc_uv)
+static s64 ccmicrovolt_to_uvh(s64 cc_uv)
 {
-	return div_s64(cc_uv * CC_READING_TICKS * 1000,
+	return div_s64(cc_uv * CC_READING_TICKS,
 			SLEEP_CLK_HZ * SECONDS_PER_HOUR);
 }
 
@@ -954,7 +954,7 @@ int override_mode_simultaneous_battery_voltage_and_current(int *ibat_ua,
 
 	convert_vbatt_raw_to_uv(the_chip, usb_chg, vbat_raw, vbat_uv);
 	convert_vsense_to_uv(the_chip, vsense_raw, &vsense_uv);
-	*ibat_ua = vsense_uv * 1000 / (int)the_chip->r_sense;
+	*ibat_ua = div_s64((s64)vsense_uv * 1000000LL, the_chip->r_sense_uohm);
 
 	pr_debug("vsense_raw = 0x%x vbat_raw = 0x%x"
 			" ibat_ua = %d vbat_uv = %d\n",
@@ -1151,7 +1151,7 @@ static int calculate_pc(struct pm8921_bms_chip *chip, int ocv_uv, int batt_temp,
  */
 static void calculate_cc_uah(struct pm8921_bms_chip *chip, int cc, int *val)
 {
-	int64_t cc_voltage_uv, cc_nvh, cc_uah;
+	int64_t cc_voltage_uv, cc_uvh, cc_uah;
 
 	cc_voltage_uv = cc;
 	cc_voltage_uv -= chip->cc_reading_at_100;
@@ -1161,9 +1161,9 @@ static void calculate_cc_uah(struct pm8921_bms_chip *chip, int cc, int *val)
 	cc_voltage_uv = cc_to_microvolt(chip, cc_voltage_uv);
 	cc_voltage_uv = pm8xxx_cc_adjust_for_gain(cc_voltage_uv);
 	pr_debug("cc_voltage_uv = %lld microvolts\n", cc_voltage_uv);
-	cc_nvh = ccmicrovolt_to_nvh(cc_voltage_uv);
-	pr_debug("cc_nvh = %lld nano_volt_hour\n", cc_nvh);
-	cc_uah = div_s64(cc_nvh, chip->r_sense);
+	cc_uvh = ccmicrovolt_to_uvh(cc_voltage_uv);
+	pr_debug("cc_uvh = %lld micro_volt_hour\n", cc_uvh);
+	cc_uah = div_s64(cc_uvh * 1000000LL, chip->r_sense_uohm);
 	*val = cc_uah;
 }
 
@@ -1594,14 +1594,16 @@ static int charging_adjustments(struct pm8921_bms_chip *chip,
 				int fcc_uah, int cc_uah, int uuc_uah)
 {
 	int chg_soc;
+	int vbat_batt_terminal_uv = vbat_uv
+					+ (ibat_ua * chip->rconn_mohm) / 1000;
 
 	if (chip->soc_at_cv == -EINVAL) {
 		/* In constant current charging return the calc soc */
-		if (vbat_uv <= chip->max_voltage_uv)
+		if (vbat_batt_terminal_uv <= chip->max_voltage_uv)
 			pr_debug("CC CHG SOC %d\n", soc);
 
 		/* Note the CC to CV point */
-		if (vbat_uv >= chip->max_voltage_uv) {
+		if (vbat_batt_terminal_uv >= chip->max_voltage_uv) {
 			chip->soc_at_cv = soc;
 			chip->prev_chg_soc = soc;
 			chip->ibat_at_cv_ua = ibat_ua;
@@ -1617,17 +1619,18 @@ static int charging_adjustments(struct pm8921_bms_chip *chip,
 	 */
 
 	/*
-	 * if voltage lessened (possibly because of a system load)
-	 * keep reporting the prev chg soc
+	 * if voltage lessened by more than 10mV (possibly because of
+	 * a sudden increase in system load) keep reporting the prev chg soc
 	 */
-	if (vbat_uv <= chip->max_voltage_uv) {
-		pr_debug("vbat %d < max = %d CC CHG SOC %d\n",
-			vbat_uv, chip->max_voltage_uv, chip->prev_chg_soc);
+	if (vbat_batt_terminal_uv <= chip->max_voltage_uv - 10000) {
+		pr_debug("vbat_terminals %d < max = %d CC CHG SOC %d\n",
+			vbat_batt_terminal_uv,
+			chip->max_voltage_uv, chip->prev_chg_soc);
 		return chip->prev_chg_soc;
 	}
 
 	chg_soc = linear_interpolate(chip->soc_at_cv, chip->ibat_at_cv_ua,
-					100, -100000,
+					100, -1 * chip->chg_term_ua,
 					ibat_ua);
 
 	/* always report a higher soc */
@@ -2204,7 +2207,8 @@ static int report_state_of_charge(struct pm8921_bms_chip *chip)
 	}
 
 	/* last_soc < soc  ... scale and catch up */
-	if (last_soc != -EINVAL && last_soc < soc && soc != 100)
+	if (last_soc != -EINVAL && last_soc < soc && soc != 100
+				&& chip->catch_up_time_us != 0)
 		soc = scale_soc_while_chg(chip, delta_time_us, soc, last_soc);
 
 	last_soc = soc;
@@ -2363,25 +2367,25 @@ EXPORT_SYMBOL(pm8921_bms_get_vsense_avg);
 
 int pm8921_bms_get_battery_current(int *result_ua)
 {
-	int vsense;
+	int vsense_uv;
 
 	if (!the_chip) {
 		pr_err("called before initialization\n");
 		return -EINVAL;
 	}
-	if (the_chip->r_sense == 0) {
+	if (the_chip->r_sense_uohm == 0) {
 		pr_err("r_sense is zero\n");
 		return -EINVAL;
 	}
 
 	mutex_lock(&the_chip->bms_output_lock);
 	pm_bms_lock_output_data(the_chip);
-	read_vsense_avg(the_chip, &vsense);
+	read_vsense_avg(the_chip, &vsense_uv);
 	pm_bms_unlock_output_data(the_chip);
 	mutex_unlock(&the_chip->bms_output_lock);
-	pr_debug("vsense=%duV\n", vsense);
+	pr_debug("vsense=%duV\n", vsense_uv);
 	/* cast for signed division */
-	*result_ua = vsense * 1000 / (int)the_chip->r_sense;
+	*result_ua = div_s64(vsense_uv * 1000000LL, the_chip->r_sense_uohm);
 	pr_debug("ibat=%duA\n", *result_ua);
 	return 0;
 }
@@ -3197,7 +3201,7 @@ static int __devinit pm8921_bms_probe(struct platform_device *pdev)
 	mutex_init(&chip->bms_output_lock);
 	mutex_init(&chip->last_ocv_uv_mutex);
 	chip->dev = &pdev->dev;
-	chip->r_sense = pdata->r_sense;
+	chip->r_sense_uohm = pdata->r_sense_uohm;
 	chip->v_cutoff = pdata->v_cutoff;
 	chip->max_voltage_uv = pdata->max_voltage_uv;
 	chip->chg_term_ua = pdata->chg_term_ua;

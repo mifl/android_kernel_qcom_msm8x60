@@ -24,7 +24,7 @@ struct smem_client {
 static int get_device_address(struct ion_client *clnt,
 		struct ion_handle *hndl, int domain_num, int partition_num,
 		unsigned long align, unsigned long *iova,
-		unsigned long *buffer_size,	unsigned long flags)
+		unsigned long *buffer_size)
 {
 	int rc;
 	if (!iova || !buffer_size || !hndl || !clnt) {
@@ -37,7 +37,7 @@ static int get_device_address(struct ion_client *clnt,
 	dprintk(VIDC_DBG, "domain: %d, partition: %d\n",
 		domain_num, partition_num);
 	rc = ion_map_iommu(clnt, hndl, domain_num, partition_num, align,
-			0, iova, buffer_size, UNCACHED, 0);
+			0, iova, buffer_size, 0, 0);
 	if (rc)
 		dprintk(VIDC_ERR,
 		"ion_map_iommu failed(%d).domain: %d,partition: %d\n",
@@ -57,7 +57,6 @@ static int ion_user_to_kernel(struct smem_client *client,
 			struct msm_smem *mem)
 {
 	struct ion_handle *hndl;
-	unsigned long ionflag;
 	unsigned long iova = 0;
 	unsigned long buffer_size = 0;
 	int rc = 0;
@@ -68,16 +67,11 @@ static int ion_user_to_kernel(struct smem_client *client,
 		rc = -ENOMEM;
 		goto fail_import_fd;
 	}
-	rc = ion_handle_get_flags(client->clnt, hndl, &ionflag);
-	if (rc) {
-		dprintk(VIDC_ERR, "Failed to get ion flags: %d", rc);
-		goto fail_map;
-	}
 	mem->kvaddr = NULL;
 	mem->domain = domain;
 	mem->partition_num = partition;
 	rc = get_device_address(client->clnt, hndl, mem->domain,
-		mem->partition_num, 4096, &iova, &buffer_size, ionflag);
+		mem->partition_num, 4096, &iova, &buffer_size);
 	if (rc) {
 		dprintk(VIDC_ERR, "Failed to get device address: %d\n", rc);
 		goto fail_device_address;
@@ -92,7 +86,6 @@ static int ion_user_to_kernel(struct smem_client *client,
 	return rc;
 fail_device_address:
 	ion_unmap_kernel(client->clnt, hndl);
-fail_map:
 	ion_free(client->clnt, hndl);
 fail_import_fd:
 	return rc;
@@ -106,19 +99,20 @@ static int alloc_ion_mem(struct smem_client *client, size_t size,
 	unsigned long iova = 0;
 	unsigned long buffer_size = 0;
 	unsigned long ionflags = 0;
+	unsigned long heap_mask = 0;
 	int rc = 0;
 	if (flags == SMEM_CACHED)
-		ionflags |= ION_SET_CACHE(CACHED);
+		ionflags = ION_SET_CACHED(ionflags);
 	else
-		ionflags |= ION_SET_CACHE(UNCACHED);
+		ionflags = ION_SET_UNCACHED(ionflags);
 
-	ionflags = ionflags | ION_HEAP(ION_CP_MM_HEAP_ID);
+	heap_mask = ION_HEAP(ION_CP_MM_HEAP_ID);
 	if (align < 4096)
 		align = 4096;
 	size = (size + 4095) & (~4095);
 	dprintk(VIDC_DBG, "domain: %d, partition: %d\n",
 		domain, partition);
-	hndl = ion_alloc(client->clnt, size, align, ionflags);
+	hndl = ion_alloc(client->clnt, size, align, heap_mask, ionflags);
 	if (IS_ERR_OR_NULL(hndl)) {
 		dprintk(VIDC_ERR,
 		"Failed to allocate shared memory = %p, %d, %d, 0x%lx\n",
@@ -131,7 +125,7 @@ static int alloc_ion_mem(struct smem_client *client, size_t size,
 	mem->domain = domain;
 	mem->partition_num = partition;
 	if (map_kernel) {
-		mem->kvaddr = ion_map_kernel(client->clnt, hndl, 0);
+		mem->kvaddr = ion_map_kernel(client->clnt, hndl);
 		if (!mem->kvaddr) {
 			dprintk(VIDC_ERR,
 				"Failed to map shared mem in kernel\n");
@@ -142,7 +136,7 @@ static int alloc_ion_mem(struct smem_client *client, size_t size,
 		mem->kvaddr = NULL;
 
 	rc = get_device_address(client->clnt, hndl, mem->domain,
-		mem->partition_num, align, &iova, &buffer_size, UNCACHED);
+		mem->partition_num, align, &iova, &buffer_size);
 	if (rc) {
 		dprintk(VIDC_ERR, "Failed to get device address: %d\n",
 			rc);

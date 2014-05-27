@@ -495,6 +495,14 @@ static int msm_mctl_cmd(struct msm_cam_media_controller *p_mctl,
 		}
 		break;
 
+	case MSM_CAM_IOCTL_CHROMATIX_PARMS: {
+		if (p_mctl->eeprom_sdev) {
+			rc = v4l2_subdev_call(p_mctl->eeprom_sdev,
+				core, ioctl, VIDIOC_MSM_EEPROM_CHROMATIX, argp);
+		}
+		break;
+	}
+
 	default:
 		/* ISP config*/
 		D("%s:%d: go to default. Calling msm_isp_config\n",
@@ -549,6 +557,10 @@ static int msm_mctl_open(struct msm_cam_media_controller *p_mctl,
 		if (rc < 0) {
 			pr_err("%s: act power failed:%d\n", __func__, rc);
 			goto act_power_up_failed;
+		}
+
+		if (sinfo->eeprom_info && sinfo->eeprom_info->type == MSM_EEPROM_SPI) {
+			msm_mctl_find_eeprom_subdev(p_mctl);
 		}
 
 		if (p_mctl->csic_sdev)

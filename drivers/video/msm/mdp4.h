@@ -306,16 +306,10 @@ struct mdp4_overlay_pipe {
 	uint32 is_fg;		/* control alpha & color key */
 	uint32 srcp0_addr;	/* interleave, luma */
 	uint32 srcp0_ystride;
-	struct file *srcp0_file;
-	int put0_need;
 	uint32 srcp1_addr;	/* pseudoplanar, chroma plane */
 	uint32 srcp1_ystride;
-	struct file *srcp1_file;
-	int put1_need;
 	uint32 srcp2_addr;	/* planar color 2*/
 	uint32 srcp2_ystride;
-	struct file *srcp2_file;
-	int put2_need;
 	uint32 srcp3_addr;	/* alpha/color 3 */
 	uint32 srcp3_ystride;
 	uint32 fetch_plane;
@@ -393,6 +387,7 @@ struct mdp4_statistic {
 	ulong intr_dsi_err;
 	ulong kickoff_ov0;
 	ulong kickoff_ov1;
+	ulong kickoff_ov2;
 	ulong kickoff_dmap;
 	ulong kickoff_dmae;
 	ulong kickoff_dmas;
@@ -580,7 +575,7 @@ int mdp4_overlay_unset_mixer(int mixer);
 int mdp4_overlay_play_wait(struct fb_info *info,
 	struct msmfb_overlay_data *req);
 int mdp4_overlay_play(struct fb_info *info, struct msmfb_overlay_data *req);
-int mdp4_overlay_commit(struct fb_info *info, int mixer);
+int mdp4_overlay_commit(struct fb_info *info);
 struct mdp4_overlay_pipe *mdp4_overlay_pipe_alloc(int ptype, int mixer);
 void mdp4_overlay_dma_commit(int mixer);
 void mdp4_overlay_vsync_commit(struct mdp4_overlay_pipe *pipe);
@@ -884,7 +879,7 @@ int mdp4_overlay_borderfill_supported(void);
 int mdp4_overlay_writeback_on(struct platform_device *pdev);
 int mdp4_overlay_writeback_off(struct platform_device *pdev);
 void mdp4_writeback_overlay(struct msm_fb_data_type *mfd);
-void mdp4_overlay1_done_writeback(struct mdp_dma_data *dma);
+void mdp4_overlay2_done_wfd(struct mdp_dma_data *dma);
 
 int mdp4_writeback_start(struct fb_info *info);
 int mdp4_writeback_stop(struct fb_info *info);
@@ -934,19 +929,23 @@ int mdp4_update_base_blend(struct msm_fb_data_type *mfd,
 u32 mdp4_get_mixer_num(u32 panel_type);
 
 #ifndef CONFIG_FB_MSM_WRITEBACK_MSM_PANEL
-static inline void mdp4_writeback_dma_busy_wait(struct msm_fb_data_type *mfd)
+static inline void mdp4_wfd_pipe_queue(int cndx, struct mdp4_overlay_pipe *pipe)
 {
 	/* empty */
 }
-static inline void mdp4_writeback_kickoff_video(struct msm_fb_data_type *mfd,
-		struct mdp4_overlay_pipe *pipe)
+static inline void mdp4_wfd_init(int cndx)
 {
 	/* empty */
+}
+static inline int mdp4_wfd_pipe_commit(struct msm_fb_data_type *mfd,
+					int cndx, int wait)
+{
+	return 0;
 }
 #else
-void mdp4_writeback_dma_busy_wait(struct msm_fb_data_type *mfd);
-void mdp4_writeback_kickoff_video(struct msm_fb_data_type *mfd,
-		struct mdp4_overlay_pipe *pipe);
+void mdp4_wfd_pipe_queue(int cndx, struct mdp4_overlay_pipe *pipe);
+void mdp4_wfd_init(int cndx);
+int mdp4_wfd_pipe_commit(struct msm_fb_data_type *mfd, int cndx, int wait);
 #endif
 
 #endif /* MDP_H */

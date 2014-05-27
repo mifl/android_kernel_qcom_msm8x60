@@ -126,12 +126,12 @@ struct msm_rpm_platform_data msm8930_rpm_data __initdata = {
 		MSM_RPM_MAP(8930, PM8038_CLK2_0, PM8038_CLK2, 2),
 		MSM_RPM_MAP(8930, PM8038_LVS1, PM8038_LVS1, 1),
 		MSM_RPM_MAP(8930, PM8038_LVS2, PM8038_LVS2, 1),
-		MSM_RPM_MAP(8930, NCP_0, NCP, 2),
-		MSM_RPM_MAP(8930, CXO_BUFFERS, CXO_BUFFERS, 1),
-		MSM_RPM_MAP(8930, USB_OTG_SWITCH, USB_OTG_SWITCH, 1),
-		MSM_RPM_MAP(8930, HDMI_SWITCH, HDMI_SWITCH, 1),
-		MSM_RPM_MAP(8930, QDSS_CLK, QDSS_CLK, 1),
-		MSM_RPM_MAP(8930, VOLTAGE_CORNER, VOLTAGE_CORNER, 1),
+		MSM_RPM_MAP_PMIC(8930, 8038, NCP_0, NCP, 2),
+		MSM_RPM_MAP_PMIC(8930, 8038, CXO_BUFFERS, CXO_BUFFERS, 1),
+		MSM_RPM_MAP_PMIC(8930, 8038, USB_OTG_SWITCH, USB_OTG_SWITCH, 1),
+		MSM_RPM_MAP_PMIC(8930, 8038, HDMI_SWITCH, HDMI_SWITCH, 1),
+		MSM_RPM_MAP_PMIC(8930, 8038, QDSS_CLK, QDSS_CLK, 1),
+		MSM_RPM_MAP_PMIC(8930, 8038, VOLTAGE_CORNER, VOLTAGE_CORNER, 1),
 	},
 	.target_status = {
 		MSM_RPM_STATUS_ID_MAP(8930, VERSION_MAJOR),
@@ -352,12 +352,12 @@ struct msm_rpm_platform_data msm8930_rpm_data_pm8917 __initdata = {
 		MSM_RPM_MAP(8930, PM8917_LVS5, PM8917_LVS5, 1),
 		MSM_RPM_MAP(8930, PM8917_LVS6, PM8917_LVS6, 1),
 		MSM_RPM_MAP(8930, PM8917_LVS7, PM8917_LVS7, 1),
-		MSM_RPM_MAP(8930, NCP_0, NCP, 2),
-		MSM_RPM_MAP(8930, CXO_BUFFERS, CXO_BUFFERS, 1),
-		MSM_RPM_MAP(8930, USB_OTG_SWITCH, USB_OTG_SWITCH, 1),
-		MSM_RPM_MAP(8930, HDMI_SWITCH, HDMI_SWITCH, 1),
-		MSM_RPM_MAP(8930, QDSS_CLK, QDSS_CLK, 1),
-		MSM_RPM_MAP(8930, VOLTAGE_CORNER, VOLTAGE_CORNER, 1),
+		MSM_RPM_MAP_PMIC(8930, 8917, NCP_0, NCP, 2),
+		MSM_RPM_MAP_PMIC(8930, 8917, CXO_BUFFERS, CXO_BUFFERS, 1),
+		MSM_RPM_MAP_PMIC(8930, 8917, USB_OTG_SWITCH, USB_OTG_SWITCH, 1),
+		MSM_RPM_MAP_PMIC(8930, 8917, HDMI_SWITCH, HDMI_SWITCH, 1),
+		MSM_RPM_MAP_PMIC(8930, 8917, QDSS_CLK, QDSS_CLK, 1),
+		MSM_RPM_MAP_PMIC(8930, 8917, VOLTAGE_CORNER, VOLTAGE_CORNER, 1),
 	},
 	.target_status = {
 		MSM_RPM_STATUS_ID_MAP(8930, VERSION_MAJOR),
@@ -676,6 +676,20 @@ static struct fs_driver_data mdp_fs_data_8930 = {
 	.bus_port1 = MSM_BUS_MASTER_MDP_PORT1,
 };
 
+static struct fs_driver_data mdp_fs_data_8930_pm8917 = {
+	.clks = (struct fs_clk_data[]){
+		{ .name = "core_clk" },
+		{ .name = "iface_clk" },
+		{ .name = "bus_clk" },
+		{ .name = "vsync_clk" },
+		{ .name = "lut_clk" },
+		{ .name = "reset1_clk" },
+		{ 0 }
+	},
+	.bus_port0 = MSM_BUS_MASTER_MDP_PORT0,
+	.bus_port1 = MSM_BUS_MASTER_MDP_PORT1,
+};
+
 static struct fs_driver_data mdp_fs_data_8627 = {
 	.clks = (struct fs_clk_data[]){
 		{ .name = "core_clk" },
@@ -741,6 +755,18 @@ struct platform_device *msm8930_footswitch[] __initdata = {
 	FS_8X60(FS_VED,    "vdd",	"msm_vidc.0",	&ved_fs_data),
 };
 unsigned msm8930_num_footswitch __initdata = ARRAY_SIZE(msm8930_footswitch);
+
+struct platform_device *msm8930_pm8917_footswitch[] __initdata = {
+	FS_8X60(FS_MDP,    "vdd",	"mdp.0",      &mdp_fs_data_8930_pm8917),
+	FS_8X60(FS_ROT,    "vdd",	"msm_rotator.0", &rot_fs_data),
+	FS_8X60(FS_IJPEG,  "vdd",	"msm_gemini.0", &ijpeg_fs_data),
+	FS_8X60(FS_VFE,    "vdd",	"msm_vfe.0",	&vfe_fs_data),
+	FS_8X60(FS_VPE,    "vdd",	"msm_vpe.0",	&vpe_fs_data),
+	FS_8X60(FS_GFX3D,  "vdd",	"kgsl-3d0.0",	&gfx3d_fs_data),
+	FS_8X60(FS_VED,    "vdd",	"msm_vidc.0",	&ved_fs_data),
+};
+unsigned msm8930_pm8917_num_footswitch __initdata =
+		ARRAY_SIZE(msm8930_pm8917_footswitch);
 
 struct platform_device *msm8627_footswitch[] __initdata = {
 	FS_8X60(FS_MDP,    "vdd",	"mdp.0",	&mdp_fs_data_8627),
@@ -1035,6 +1061,75 @@ static struct msm_bus_scale_pdata vidc_bus_client_data = {
 	.name = "vidc",
 };
 #endif
+
+#define MSM_GSBI11_PHYS	0x12440000
+#define MSM_GSBI11_QUP_PHYS	(MSM_GSBI11_PHYS + 0x20000)
+#define MSM8930_GSBI11_QUP_IRQ GSBI11_QUP_IRQ
+
+static struct resource resources_qup_spi_gsbi11[] = {
+	{
+		.name = "spi_base",
+		.start = MSM_GSBI11_QUP_PHYS,
+		.end = MSM_GSBI11_QUP_PHYS + SZ_4K - 1,
+		.flags = IORESOURCE_MEM,
+	},
+	{
+		.name = "gsbi_base",
+		.start = MSM_GSBI11_PHYS,
+		.end = MSM_GSBI11_PHYS + 4 - 1,
+		.flags = IORESOURCE_MEM,
+	},
+	{
+		.name = "spi_irq_in",
+		.start = MSM8930_GSBI11_QUP_IRQ,
+		.end = MSM8930_GSBI11_QUP_IRQ,
+		.flags = IORESOURCE_IRQ,
+	},
+	{
+		.name = "spi_clk",
+		.start = 41,
+		.end = 41,
+		.flags = IORESOURCE_IO,
+	},
+	{
+		.name = "spi_cs",
+		.start = 40,
+		.end = 40,
+		.flags = IORESOURCE_IO,
+	},
+	{
+		.name = "spi_miso",
+		.start = 39,
+		.end = 39,
+		.flags = IORESOURCE_IO,
+	},
+	{
+		.name = "spi_mosi",
+		.start = 38,
+		.end = 38,
+		.flags = IORESOURCE_IO,
+	},
+#if 0
+	{
+		.name = "spidm_channels",
+		.start = 12,
+		.end = 12,
+		.flags = IORESOURCE_DMA,
+	},
+	{
+		.name = "spidm_crci",
+		.start = 12,
+		.end = 13,
+		.flags = IORESOURCE_DMA,
+	},
+#endif
+};
+struct platform_device msm8930_device_qup_spi_gsbi11 = {
+	.name = "spi_qsd",
+	.id = 1,
+	.num_resources = ARRAY_SIZE(resources_qup_spi_gsbi11),
+	.resource = resources_qup_spi_gsbi11,
+};
 
 #define MSM_VIDC_BASE_PHYS 0x04400000
 #define MSM_VIDC_BASE_SIZE 0x00100000

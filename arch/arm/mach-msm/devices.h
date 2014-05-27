@@ -83,6 +83,8 @@ extern struct platform_device msm8960_device_cache_erp;
 extern struct platform_device msm8960_device_ebi1_ch0_erp;
 extern struct platform_device msm8960_device_ebi1_ch1_erp;
 
+extern struct platform_device msm8930_device_qup_spi_gsbi11;
+
 extern struct platform_device apq8064_device_uart_gsbi1;
 extern struct platform_device apq8064_device_uart_gsbi3;
 extern struct platform_device apq8064_device_uart_gsbi7;
@@ -298,6 +300,8 @@ extern struct platform_device *apq8064_footswitch[];
 extern unsigned apq8064_num_footswitch;
 extern struct platform_device *msm8930_footswitch[];
 extern unsigned msm8930_num_footswitch;
+extern struct platform_device *msm8930_pm8917_footswitch[];
+extern unsigned msm8930_pm8917_num_footswitch;
 extern struct platform_device *msm8627_footswitch[];
 extern unsigned msm8627_num_footswitch;
 
