@@ -11,6 +11,7 @@
  *
  */
 
+#include <linux/export.h>
 #include <linux/workqueue.h>
 #include <linux/delay.h>
 #include <linux/types.h>
@@ -208,9 +209,6 @@ static int __msm_register_pmem(struct hlist_head *ptype,
 	case MSM_PMEM_IHIST:
 	case MSM_PMEM_SKIN:
 	case MSM_PMEM_AEC_AWB:
-	case MSM_PMEM_BAYER_GRID:
-	case MSM_PMEM_BAYER_FOCUS:
-	case MSM_PMEM_BAYER_HIST:
 		rc = msm_pmem_table_add(ptype, pinfo, client);
 		break;
 
@@ -238,9 +236,6 @@ static int __msm_pmem_table_del(struct hlist_head *ptype,
 	case MSM_PMEM_IHIST:
 	case MSM_PMEM_SKIN:
 	case MSM_PMEM_AEC_AWB:
-	case MSM_PMEM_BAYER_GRID:
-	case MSM_PMEM_BAYER_FOCUS:
-	case MSM_PMEM_BAYER_HIST:
 		hlist_for_each_entry_safe(region, node, n,
 				ptype, list) {
 
@@ -405,7 +400,7 @@ int msm_register_pmem(struct hlist_head *ptype, void __user *arg,
 
 	return __msm_register_pmem(ptype, &info, client);
 }
-//EXPORT_SYMBOL(msm_register_pmem);
+EXPORT_SYMBOL(msm_register_pmem);
 
 int msm_pmem_table_del(struct hlist_head *ptype, void __user *arg,
 					   struct ion_client *client)
@@ -419,4 +414,4 @@ int msm_pmem_table_del(struct hlist_head *ptype, void __user *arg,
 
 	return __msm_pmem_table_del(ptype, &info, client);
 }
-//EXPORT_SYMBOL(msm_pmem_table_del);
+EXPORT_SYMBOL(msm_pmem_table_del);

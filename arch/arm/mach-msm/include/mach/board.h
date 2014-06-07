@@ -184,11 +184,10 @@ enum camera_vreg_type {
 	REG_LDO,
 	REG_VS,
 	REG_GPIO,
-	REG_MAX
 };
 
 struct camera_vreg_t {
-	const char *reg_name;
+	char *reg_name;
 	enum camera_vreg_type type;
 	int min_voltage;
 	int max_voltage;
@@ -202,8 +201,8 @@ struct msm_gpio_set_tbl {
 };
 
 struct msm_camera_csi_lane_params {
-	uint16_t csi_lane_assign;
-	uint16_t csi_lane_mask;
+	uint8_t csi_lane_assign;
+	uint8_t csi_lane_mask;
 };
 
 struct msm_camera_gpio_conf {
