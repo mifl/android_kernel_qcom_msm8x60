@@ -36,16 +36,14 @@
 
 #include "acpuclock.h"
 #include "acpuclock-krait.h"
+#include "avs.h"
 
 /* MUX source selects. */
 #define PRI_SRC_SEL_SEC_SRC	0
 #define PRI_SRC_SEL_HFPLL	1
 #define PRI_SRC_SEL_HFPLL_DIV2	2
-#define SEC_SRC_SEL_L2PLL	1
-#define SEC_SRC_SEL_AUX		2
 
-/* PTE EFUSE register offset. */
-#define PTE_EFUSE		0xC0
+#define SECCLKAGD		BIT(4)
 
 static DEFINE_MUTEX(driver_lock);
 static DEFINE_SPINLOCK(l2_lock);
@@ -81,14 +79,24 @@ static void set_pri_clk_src(struct scalable *sc, u32 pri_src_sel)
 }
 
 /* Select a source on the secondary MUX. */
-static void set_sec_clk_src(struct scalable *sc, u32 sec_src_sel)
+static void __cpuinit set_sec_clk_src(struct scalable *sc, u32 sec_src_sel)
 {
 	u32 regval;
 
+	/* 8064 Errata: disable sec_src clock gating during switch. */
 	regval = get_l2_indirect_reg(sc->l2cpmr_iaddr);
+	regval |= SECCLKAGD;
+	set_l2_indirect_reg(sc->l2cpmr_iaddr, regval);
+
+	/* Program the MUX */
 	regval &= ~(0x3 << 2);
 	regval |= ((sec_src_sel & 0x3) << 2);
 	set_l2_indirect_reg(sc->l2cpmr_iaddr, regval);
+
+	/* 8064 Errata: re-enabled sec_src clock gating. */
+	regval &= ~SECCLKAGD;
+	set_l2_indirect_reg(sc->l2cpmr_iaddr, regval);
+
 	/* Wait for switch to complete. */
 	mb();
 	udelay(1);
@@ -222,7 +230,6 @@ static void set_speed(struct scalable *sc, const struct core_speed *tgt_s)
 		 * Move to an always-on source running at a frequency
 		 * that does not require an elevated CPU voltage.
 		 */
-		set_sec_clk_src(sc, SEC_SRC_SEL_AUX);
 		set_pri_clk_src(sc, PRI_SRC_SEL_SEC_SRC);
 
 		/* Re-program HFPLL. */
@@ -233,15 +240,12 @@ static void set_speed(struct scalable *sc, const struct core_speed *tgt_s)
 		/* Move to HFPLL. */
 		set_pri_clk_src(sc, tgt_s->pri_src_sel);
 	} else if (strt_s->src == HFPLL && tgt_s->src != HFPLL) {
-		set_sec_clk_src(sc, tgt_s->sec_src_sel);
 		set_pri_clk_src(sc, tgt_s->pri_src_sel);
 		hfpll_disable(sc, false);
 	} else if (strt_s->src != HFPLL && tgt_s->src == HFPLL) {
 		hfpll_set_rate(sc, tgt_s);
 		hfpll_enable(sc, false);
 		set_pri_clk_src(sc, tgt_s->pri_src_sel);
-	} else {
-		set_sec_clk_src(sc, tgt_s->sec_src_sel);
 	}
 
 	sc->cur_speed = tgt_s;
@@ -472,6 +476,12 @@ static int acpuclk_krait_set_rate(int cpu, unsigned long rate,
 	vdd_data.vdd_core = calculate_vdd_core(tgt);
 	vdd_data.ua_core = tgt->ua_core;
 
+	/* Disable AVS before voltage switch */
+	if (reason == SETRATE_CPUFREQ && drv.scalable[cpu].avs_enabled) {
+		AVS_DISABLE(cpu);
+		drv.scalable[cpu].avs_enabled = false;
+	}
+
 	/* Increase VDD levels if needed. */
 	if (reason == SETRATE_CPUFREQ || reason == SETRATE_HOTPLUG) {
 		rc = increase_vdd(cpu, &vdd_data, reason);
@@ -506,6 +516,12 @@ static int acpuclk_krait_set_rate(int cpu, unsigned long rate,
 
 	/* Drop VDD levels if we can. */
 	decrease_vdd(cpu, &vdd_data, reason);
+
+	/* Re-enable AVS */
+	if (reason == SETRATE_CPUFREQ && tgt->avsdscr_setting) {
+		AVS_ENABLE(cpu, tgt->avsdscr_setting);
+		drv.scalable[cpu].avs_enabled = true;
+	}
 
 	dev_dbg(drv.dev, "ACPU%d speed change complete\n", cpu);
 
@@ -699,7 +715,7 @@ static int __cpuinit init_clock_sources(struct scalable *sc,
 	}
 
 	/* Switch away from the HFPLL while it's re-initialized. */
-	set_sec_clk_src(sc, SEC_SRC_SEL_AUX);
+	set_sec_clk_src(sc, sc->sec_clk_sel);
 	set_pri_clk_src(sc, PRI_SRC_SEL_SEC_SRC);
 	hfpll_init(sc, tgt_s);
 
@@ -709,7 +725,6 @@ static int __cpuinit init_clock_sources(struct scalable *sc,
 	set_l2_indirect_reg(sc->l2cpmr_iaddr, regval);
 
 	/* Switch to the target clock source. */
-	set_sec_clk_src(sc, tgt_s->sec_src_sel);
 	set_pri_clk_src(sc, tgt_s->pri_src_sel);
 	sc->cur_speed = tgt_s;
 
@@ -720,7 +735,6 @@ static void __cpuinit fill_cur_core_speed(struct core_speed *s,
 					  struct scalable *sc)
 {
 	s->pri_src_sel = get_l2_indirect_reg(sc->l2cpmr_iaddr) & 0x3;
-	s->sec_src_sel = (get_l2_indirect_reg(sc->l2cpmr_iaddr) >> 2) & 0x3;
 	s->pll_l_val = readl_relaxed(sc->hfpll_base + drv.hfpll_data->l_offset);
 }
 
@@ -728,7 +742,6 @@ static bool __cpuinit speed_equal(const struct core_speed *s1,
 				  const struct core_speed *s2)
 {
 	return (s1->pri_src_sel == s2->pri_src_sel &&
-		s1->sec_src_sel == s2->sec_src_sel &&
 		s1->pll_l_val == s2->pll_l_val);
 }
 
@@ -926,25 +939,27 @@ static const int krait_needs_vmin(void)
 
 static void krait_apply_vmin(struct acpu_level *tbl)
 {
-	for (; tbl->speed.khz != 0; tbl++)
+	for (; tbl->speed.khz != 0; tbl++) {
 		if (tbl->vdd_core < 1150000)
 			tbl->vdd_core = 1150000;
+		tbl->avsdscr_setting = 0;
+	}
 }
 
-static int __init select_freq_plan(u32 qfprom_phys)
+static int __init select_freq_plan(u32 pte_efuse_phys)
 {
-	void __iomem *qfprom_base;
-	u32 pte_efuse, pvs, tbl_idx;
+	void __iomem *pte_efuse;
+	u32 pte_efuse_val, pvs, tbl_idx;
 	char *pvs_names[] = { "Slow", "Nominal", "Fast", "Faster", "Unknown" };
 
-	qfprom_base = ioremap(qfprom_phys, SZ_256);
+	pte_efuse = ioremap(pte_efuse_phys, 4);
 	/* Select frequency tables. */
-	if (qfprom_base) {
-		pte_efuse = readl_relaxed(qfprom_base + PTE_EFUSE);
-		pvs = (pte_efuse >> 10) & 0x7;
-		iounmap(qfprom_base);
+	if (pte_efuse) {
+		pte_efuse_val = readl_relaxed(pte_efuse);
+		pvs = (pte_efuse_val >> 10) & 0x7;
+		iounmap(pte_efuse);
 		if (pvs == 0x7)
-			pvs = (pte_efuse >> 13) & 0x7;
+			pvs = (pte_efuse_val >> 13) & 0x7;
 
 		switch (pvs) {
 		case 0x0:
@@ -1005,7 +1020,7 @@ static void __init drv_data_init(struct device *dev,
 		GFP_KERNEL);
 	BUG_ON(!drv.bus_scale->usecase);
 
-	tbl_idx = select_freq_plan(params->qfprom_phys_base);
+	tbl_idx = select_freq_plan(params->pte_efuse_phys);
 	drv.acpu_freq_tbl = kmemdup(params->pvs_tables[tbl_idx].table,
 				    params->pvs_tables[tbl_idx].size,
 				    GFP_KERNEL);

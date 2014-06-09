@@ -760,6 +760,14 @@ static int msm_otg_suspend(struct msm_otg *motg)
 		test_bit(A_BUS_SUSPEND, &motg->inputs) &&
 		motg->caps & ALLOW_LPM_ON_DEV_SUSPEND;
 	dcp = motg->chg_type == USB_DCP_CHARGER;
+
+	/* charging detection in progress due to cable plug-in */
+	if (test_bit(B_SESS_VLD, &motg->inputs) && !device_bus_suspend &&
+		!dcp) {
+		enable_irq(motg->irq);
+		return -EBUSY;
+	}
+
 	/*
 	 * Chipidea 45-nm PHY suspend sequence:
 	 *
@@ -1911,6 +1919,8 @@ static void msm_chg_block_on(struct msm_otg *motg)
 		udelay(20);
 		break;
 	case SNPS_28NM_INTEGRATED_PHY:
+		/* disable DP and DM pull down resistors */
+		ulpi_write(phy, 0x6, 0xC);
 		/* Clear charger detecting control bits */
 		ulpi_write(phy, 0x1F, 0x86);
 		/* Clear alt interrupt latch and enable bits */
@@ -1990,8 +2000,7 @@ static void msm_chg_detect_work(struct work_struct *w)
 	switch (motg->chg_state) {
 	case USB_CHG_STATE_UNDEFINED:
 		msm_chg_block_on(motg);
-		if (motg->pdata->enable_dcd)
-			msm_chg_enable_dcd(motg);
+		msm_chg_enable_dcd(motg);
 		msm_chg_enable_aca_det(motg);
 		motg->chg_state = USB_CHG_STATE_WAIT_FOR_DCD;
 		motg->dcd_retries = 0;
@@ -2018,12 +2027,10 @@ static void msm_chg_detect_work(struct work_struct *w)
 				break;
 			}
 		}
-		if (motg->pdata->enable_dcd)
-			is_dcd = msm_chg_check_dcd(motg);
+		is_dcd = msm_chg_check_dcd(motg);
 		tmout = ++motg->dcd_retries == MSM_CHG_DCD_MAX_RETRIES;
 		if (is_dcd || tmout) {
-			if (motg->pdata->enable_dcd)
-				msm_chg_disable_dcd(motg);
+			msm_chg_disable_dcd(motg);
 			msm_chg_enable_primary_det(motg);
 			delay = MSM_CHG_PRIMARY_DET_TIME;
 			motg->chg_state = USB_CHG_STATE_DCD_DONE;

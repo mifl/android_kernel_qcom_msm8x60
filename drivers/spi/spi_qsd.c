@@ -404,17 +404,21 @@ static void msm_spi_setup_dm_transfer(struct msm_spi *dd)
 		if (bytes_sent < 0)
 			bytes_sent = 0;
 	}
-
 	/* We'll send in chunks of SPI_MAX_LEN if larger than
-	 * 4K bytes for targets that doesn't support infinite
-	 * mode. Make sure this doesn't happen on targets that
-	 * support infinite mode.
+	 * 4K bytes for targets that have only 12 bits in
+	 * QUP_MAX_OUTPUT_CNT register. If the target supports
+	 * more than 12bits then we send the data in chunks of
+	 * the infinite_mode value that is defined in the
+	 * corresponding board file.
 	 */
 	if (!dd->pdata->infinite_mode)
-		bytes_to_send = dd->tx_bytes_remaining / SPI_MAX_LEN ?
-				SPI_MAX_LEN : dd->tx_bytes_remaining;
+		dd->max_trfr_len = SPI_MAX_LEN;
 	else
-		bytes_to_send = dd->tx_bytes_remaining;
+		dd->max_trfr_len = (dd->pdata->infinite_mode) *
+			   (dd->bytes_per_word);
+
+	bytes_to_send = min_t(u32, dd->tx_bytes_remaining,
+			      dd->max_trfr_len);
 
 	num_transfers = DIV_ROUND_UP(bytes_to_send, dd->bytes_per_word);
 	dd->unaligned_len = bytes_to_send % dd->burst_size;
@@ -520,10 +524,11 @@ static void msm_spi_enqueue_dm_commands(struct msm_spi *dd)
 		msm_dmov_enqueue_cmd(dd->rx_dma_chan, &dd->rx_hdr);
 }
 
-/* SPI core on targets that does not support infinite mode can send maximum of
-   4K transfers, Therefore, we are sending several chunks of 3K or less
-   (depending on how much is left). Upon completion we send the next chunk,
-   or complete the transfer if everything is finished. On targets that support
+/* SPI core on targets that does not support infinite mode can send
+   maximum of 4K transfers or 64K transfers depending up on size of
+   MAX_OUTPUT_COUNT register, Therefore, we are sending in several
+   chunks. Upon completion we send the next chunk, or complete the
+   transfer if everything is finished. On targets that support
    infinite mode, we send all the bytes in as single chunk.
 */
 static int msm_spi_dm_send_next(struct msm_spi *dd)
@@ -536,9 +541,8 @@ static int msm_spi_dm_send_next(struct msm_spi *dd)
 
 	/* On targets which does not support infinite mode,
 	   We need to send more chunks, if we sent max last time  */
-	if ((!dd->pdata->infinite_mode) &&
-	    (dd->tx_bytes_remaining > SPI_MAX_LEN)) {
-		dd->tx_bytes_remaining -= SPI_MAX_LEN;
+	if (dd->tx_bytes_remaining > dd->max_trfr_len) {
+		dd->tx_bytes_remaining -= dd->max_trfr_len;
 		if (msm_spi_set_state(dd, SPI_OP_STATE_RESET))
 			return 0;
 		dd->read_len = dd->write_len = 0;
@@ -1294,6 +1298,7 @@ static void msm_spi_workq(struct work_struct *work)
 		container_of(work, struct msm_spi, work_data);
 	unsigned long        flags;
 	u32                  status_error = 0;
+	int                  rc = 0;
 
 	mutex_lock(&dd->core_lock);
 
@@ -1303,6 +1308,21 @@ static void msm_spi_workq(struct work_struct *work)
 				  dd->pm_lat);
 	if (dd->use_rlock)
 		remote_mutex_lock(&dd->r_lock);
+
+	/* Configure the spi clk, miso, mosi and cs gpio */
+	if (dd->pdata->gpio_config) {
+		rc = dd->pdata->gpio_config();
+		if (rc) {
+			dev_err(dd->dev,
+					"%s: error configuring GPIOs\n",
+					__func__);
+			status_error = 1;
+		}
+	}
+
+	rc = msm_spi_request_gpios(dd);
+	if (rc)
+		status_error = 1;
 
 	clk_prepare_enable(dd->clk);
 	clk_prepare_enable(dd->pclk);
@@ -1334,6 +1354,12 @@ static void msm_spi_workq(struct work_struct *work)
 	msm_spi_disable_irqs(dd);
 	clk_disable_unprepare(dd->clk);
 	clk_disable_unprepare(dd->pclk);
+
+	/* Free  the spi clk, miso, mosi, cs gpio */
+	if (!rc && dd->pdata && dd->pdata->gpio_release)
+		dd->pdata->gpio_release();
+	if (!rc)
+		msm_spi_free_gpios(dd);
 
 	if (dd->use_rlock)
 		remote_mutex_unlock(&dd->r_lock);
@@ -1421,6 +1447,24 @@ static int msm_spi_setup(struct spi_device *spi)
 	if (dd->use_rlock)
 		remote_mutex_lock(&dd->r_lock);
 
+	/* Configure the spi clk, miso, mosi, cs gpio */
+	if (dd->pdata->gpio_config) {
+		rc = dd->pdata->gpio_config();
+		if (rc) {
+			dev_err(&spi->dev,
+					"%s: error configuring GPIOs\n",
+					__func__);
+			rc = -ENXIO;
+			goto err_setup_gpio;
+		}
+	}
+
+	rc = msm_spi_request_gpios(dd);
+	if (rc) {
+		rc = -ENXIO;
+		goto err_setup_gpio;
+	}
+
 	clk_prepare_enable(dd->clk);
 	clk_prepare_enable(dd->pclk);
 
@@ -1453,10 +1497,15 @@ static int msm_spi_setup(struct spi_device *spi)
 	clk_disable_unprepare(dd->clk);
 	clk_disable_unprepare(dd->pclk);
 
+	/* Free  the spi clk, miso, mosi, cs gpio */
+	if (dd->pdata && dd->pdata->gpio_release)
+		dd->pdata->gpio_release();
+	msm_spi_free_gpios(dd);
+
+err_setup_gpio:
 	if (dd->use_rlock)
 		remote_mutex_unlock(&dd->r_lock);
 	mutex_unlock(&dd->core_lock);
-
 err_setup_exit:
 	return rc;
 }
@@ -1893,22 +1942,9 @@ static int __init msm_spi_probe(struct platform_device *pdev)
 			dd->use_dma = 1;
 			master->dma_alignment =	dma_get_cache_alignment();
 		}
-
-skip_dma_resources:
-		if (pdata->gpio_config) {
-			rc = pdata->gpio_config();
-			if (rc) {
-				dev_err(&pdev->dev,
-					"%s: error configuring GPIOs\n",
-					__func__);
-				goto err_probe_gpio;
-			}
-		}
 	}
 
-	rc = msm_spi_request_gpios(dd);
-	if (rc)
-		goto err_probe_gpio;
+skip_dma_resources:
 
 	spin_lock_init(&dd->queue_lock);
 	mutex_init(&dd->core_lock);
@@ -1947,8 +1983,8 @@ skip_dma_resources:
 
 		dd->use_rlock = 1;
 		dd->pm_lat = pdata->pm_lat;
-		pm_qos_add_request(&qos_req_list, PM_QOS_CPU_DMA_LATENCY, 
-					    	 PM_QOS_DEFAULT_VALUE);
+		pm_qos_add_request(&qos_req_list, PM_QOS_CPU_DMA_LATENCY,
+					PM_QOS_DEFAULT_VALUE);
 	}
 
 	mutex_lock(&dd->core_lock);
@@ -2047,6 +2083,7 @@ skip_dma_resources:
 	}
 
 	spi_debugfs_init(dd);
+
 	return 0;
 
 err_attrs:
@@ -2077,10 +2114,6 @@ err_probe_rlock_init:
 err_probe_reqmem:
 	destroy_workqueue(dd->workqueue);
 err_probe_workq:
-	msm_spi_free_gpios(dd);
-err_probe_gpio:
-	if (pdata && pdata->gpio_release)
-		pdata->gpio_release();
 err_probe_res:
 	spi_master_put(master);
 err_probe_exit:
@@ -2107,7 +2140,6 @@ static int msm_spi_suspend(struct platform_device *pdev, pm_message_t state)
 
 	/* Wait for transactions to end, or time out */
 	wait_event_interruptible(dd->continue_suspend, !dd->transfer_pending);
-	msm_spi_free_gpios(dd);
 
 suspend_exit:
 	return 0;
@@ -2124,7 +2156,6 @@ static int msm_spi_resume(struct platform_device *pdev)
 	if (!dd)
 		goto resume_exit;
 
-	BUG_ON(msm_spi_request_gpios(dd) != 0);
 	dd->suspended = 0;
 resume_exit:
 	return 0;
@@ -2138,17 +2169,13 @@ static int __devexit msm_spi_remove(struct platform_device *pdev)
 {
 	struct spi_master *master = platform_get_drvdata(pdev);
 	struct msm_spi    *dd = spi_master_get_devdata(master);
-	struct msm_spi_platform_data *pdata = pdev->dev.platform_data;
 
 	pm_qos_remove_request(&qos_req_list);
 	spi_debugfs_exit(dd);
 	sysfs_remove_group(&pdev->dev.kobj, &dev_attr_grp);
 
 	msm_spi_teardown_dma(dd);
-	if (pdata && pdata->gpio_release)
-		pdata->gpio_release();
 
-	msm_spi_free_gpios(dd);
 	clk_put(dd->clk);
 	clk_put(dd->pclk);
 	destroy_workqueue(dd->workqueue);

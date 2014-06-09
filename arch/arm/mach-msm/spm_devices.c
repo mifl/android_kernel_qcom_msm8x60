@@ -38,6 +38,12 @@ struct msm_spm_device {
 	uint32_t num_modes;
 };
 
+struct msm_spm_vdd_info {
+	uint32_t cpu;
+	uint32_t vlevel;
+	int err;
+};
+
 static struct msm_spm_device msm_spm_l2_device;
 static DEFINE_PER_CPU_SHARED_ALIGNED(struct msm_spm_device, msm_cpu_spm_device);
 
@@ -52,6 +58,15 @@ int msm_spm_set_vdd(unsigned int cpu, unsigned int vlevel)
 	return ret;
 }
 EXPORT_SYMBOL(msm_spm_set_vdd);
+
+unsigned int msm_spm_get_vdd(unsigned int cpu)
+{
+	struct msm_spm_device *dev;
+
+	dev = &per_cpu(msm_cpu_spm_device, cpu);
+	return msm_spm_drv_get_sts_curr_pmic_data(&dev->reg_data);
+}
+EXPORT_SYMBOL(msm_spm_get_vdd);
 
 static int msm_spm_dev_set_low_power_mode(struct msm_spm_device *dev,
 		unsigned int mode, bool notify_rpm)

@@ -58,6 +58,7 @@ struct ks_bridge {
 	struct list_head	to_mdm_list;
 	struct list_head	to_ks_list;
 	wait_queue_head_t	ks_wait_q;
+	struct miscdevice	*fs_dev;
 
 	/* usb specific */
 	struct usb_device	*udev;
@@ -69,7 +70,6 @@ struct ks_bridge {
 	struct usb_anchor	submitted;
 
 	unsigned long		flags;
-	unsigned int		alloced_read_pkts;
 
 #define DBG_MSG_LEN   40
 #define DBG_MAX_MSG   500
@@ -136,6 +136,8 @@ static void ksb_free_data_pkt(struct data_pkt *pkt)
 }
 
 
+static void
+submit_one_urb(struct ks_bridge *ksb, gfp_t flags, struct data_pkt *pkt);
 static ssize_t ksb_fs_read(struct file *fp, char __user *buf,
 				size_t count, loff_t *pos)
 {
@@ -175,7 +177,6 @@ read_start:
 		if (ret) {
 			pr_err("copy_to_user failed err:%d\n", ret);
 			ksb_free_data_pkt(pkt);
-			ksb->alloced_read_pkts--;
 			return ret;
 		}
 
@@ -184,9 +185,16 @@ read_start:
 
 		spin_lock_irqsave(&ksb->lock, flags);
 		if (pkt->n_read == pkt->len) {
+			/*
+			 * re-init the packet and queue it
+			 * for more data.
+			 */
 			list_del_init(&pkt->list);
-			ksb_free_data_pkt(pkt);
-			ksb->alloced_read_pkts--;
+			pkt->n_read = 0;
+			pkt->len = MAX_DATA_PKT_SIZE;
+			spin_unlock_irqrestore(&ksb->lock, flags);
+			submit_one_urb(ksb, GFP_KERNEL, pkt);
+			spin_lock_irqsave(&ksb->lock, flags);
 		}
 	}
 	spin_unlock_irqrestore(&ksb->lock, flags);
@@ -260,6 +268,8 @@ static void ksb_tomdm_work(struct work_struct *w)
 			usb_autopm_put_interface(ksb->ifc);
 			return;
 		}
+
+		usb_free_urb(urb);
 
 		spin_lock_irqsave(&ksb->lock, flags);
 	}
@@ -392,25 +402,18 @@ static const struct usb_device_id ksb_usb_ids[] = {
 MODULE_DEVICE_TABLE(usb, ksb_usb_ids);
 
 static void ksb_rx_cb(struct urb *urb);
-static void submit_one_urb(struct ks_bridge *ksb)
+static void
+submit_one_urb(struct ks_bridge *ksb, gfp_t flags, struct data_pkt *pkt)
 {
-	struct data_pkt	*pkt;
 	struct urb *urb;
 	int ret;
 
-	pkt = ksb_alloc_data_pkt(MAX_DATA_PKT_SIZE, GFP_ATOMIC, ksb);
-	if (IS_ERR(pkt)) {
-		pr_err("unable to allocate data pkt");
-		return;
-	}
-
-	urb = usb_alloc_urb(0, GFP_ATOMIC);
+	urb = usb_alloc_urb(0, flags);
 	if (!urb) {
 		pr_err("unable to allocate urb");
 		ksb_free_data_pkt(pkt);
 		return;
 	}
-	ksb->alloced_read_pkts++;
 
 	usb_fill_bulk_urb(urb, ksb->udev, ksb->in_pipe,
 			pkt->buf, pkt->len,
@@ -419,13 +422,12 @@ static void submit_one_urb(struct ks_bridge *ksb)
 
 	dbg_log_event(ksb, "S RX_URB", pkt->len, 0);
 
-	ret = usb_submit_urb(urb, GFP_ATOMIC);
+	ret = usb_submit_urb(urb, flags);
 	if (ret) {
 		pr_err("in urb submission failed");
 		usb_unanchor_urb(urb);
 		usb_free_urb(urb);
 		ksb_free_data_pkt(pkt);
-		ksb->alloced_read_pkts--;
 		return;
 	}
 
@@ -445,14 +447,12 @@ static void ksb_rx_cb(struct urb *urb)
 			pr_err_ratelimited("urb failed with err:%d",
 					urb->status);
 		ksb_free_data_pkt(pkt);
-		ksb->alloced_read_pkts--;
 		return;
 	}
 
 	if (urb->actual_length == 0) {
-		ksb_free_data_pkt(pkt);
-		ksb->alloced_read_pkts--;
-		goto resubmit_urb;
+		submit_one_urb(ksb, GFP_ATOMIC, pkt);
+		return;
 	}
 
 	spin_lock(&ksb->lock);
@@ -462,10 +462,6 @@ static void ksb_rx_cb(struct urb *urb)
 
 	/* wake up read thread */
 	wake_up(&ksb->ks_wait_q);
-
-resubmit_urb:
-	submit_one_urb(ksb);
-
 }
 
 static void ksb_start_rx_work(struct work_struct *w)
@@ -498,7 +494,6 @@ static void ksb_start_rx_work(struct work_struct *w)
 			ksb_free_data_pkt(pkt);
 			return;
 		}
-		ksb->alloced_read_pkts++;
 
 		usb_fill_bulk_urb(urb, ksb->udev, ksb->in_pipe,
 				pkt->buf, pkt->len,
@@ -513,7 +508,6 @@ static void ksb_start_rx_work(struct work_struct *w)
 			usb_unanchor_urb(urb);
 			usb_free_urb(urb);
 			ksb_free_data_pkt(pkt);
-			ksb->alloced_read_pkts--;
 			usb_autopm_put_interface(ksb->ifc);
 			return;
 		}
@@ -531,7 +525,6 @@ ksb_usb_probe(struct usb_interface *ifc, const struct usb_device_id *id)
 	struct usb_endpoint_descriptor	*ep_desc;
 	int				i;
 	struct ks_bridge		*ksb;
-	struct miscdevice		*fs_dev;
 
 	ifc_num = ifc->cur_altsetting->desc.bInterfaceNumber;
 
@@ -585,8 +578,8 @@ ksb_usb_probe(struct usb_interface *ifc, const struct usb_device_id *id)
 
 	dbg_log_event(ksb, "PID-ATT", id->idProduct, 0);
 
-	fs_dev = (struct miscdevice *)id->driver_info;
-	misc_register(fs_dev);
+	ksb->fs_dev = (struct miscdevice *)id->driver_info;
+	misc_register(ksb->fs_dev);
 
 	usb_enable_autosuspend(ksb->udev);
 
@@ -600,8 +593,6 @@ static int ksb_usb_suspend(struct usb_interface *ifc, pm_message_t message)
 	struct ks_bridge *ksb = usb_get_intfdata(ifc);
 
 	dbg_log_event(ksb, "SUSPEND", 0, 0);
-
-	pr_info("read cnt: %d", ksb->alloced_read_pkts);
 
 	usb_kill_anchored_urbs(&ksb->submitted);
 
@@ -649,6 +640,7 @@ static void ksb_usb_disconnect(struct usb_interface *ifc)
 	}
 	spin_unlock_irqrestore(&ksb->lock, flags);
 
+	misc_deregister(ksb->fs_dev);
 	usb_put_dev(ksb->udev);
 	ksb->ifc = NULL;
 	usb_set_intfdata(ifc, NULL);
@@ -713,7 +705,8 @@ static int __init ksb_init(void)
 		ksb = kzalloc(sizeof(struct ks_bridge), GFP_KERNEL);
 		if (!ksb) {
 			pr_err("unable to allocat mem for ks_bridge");
-			return -ENOMEM;
+			ret =  -ENOMEM;
+			goto dev_free;
 		}
 		__ksb[i] = ksb;
 

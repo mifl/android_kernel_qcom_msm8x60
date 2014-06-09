@@ -1,6 +1,6 @@
 /* Copyright (C) 2008 Google, Inc.
  * Copyright (C) 2008 HTC Corporation
- * Copyright (c) 2009-2012, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2009-2013, The Linux Foundation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -198,7 +198,7 @@ static unsigned long audio_aio_ion_fixup(struct q6audio_aio *audio, void *addr,
 
 static int audio_aio_pause(struct q6audio_aio  *audio)
 {
-	int rc = 0;
+	int rc = -EINVAL;
 
 	pr_debug("%s[%p], enabled = %d\n", __func__, audio,
 			audio->enabled);
@@ -820,10 +820,9 @@ static void audio_aio_async_write(struct q6audio_aio *audio,
 	}
 	param.msw_ts = buf_node->meta_info.meta_in.ntimestamp.highpart;
 	param.lsw_ts = buf_node->meta_info.meta_in.ntimestamp.lowpart;
+	param.flags  = buf_node->meta_info.meta_in.nflags;
 	/* If no meta_info enaled, indicate no time stamp valid */
-	if (audio->buf_cfg.meta_info_enable)
-		param.flags = 0;
-	else
+	if (!audio->buf_cfg.meta_info_enable)
 		param.flags = 0xFF00;
 	param.uid = param.paddr;
 	/* Read command will populate paddr as token */
@@ -1163,9 +1162,12 @@ long audio_aio_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		mutex_lock(&audio->lock);
 		if (arg == 1) {
 			rc = audio_aio_pause(audio);
-			if (rc < 0)
+			if (rc < 0) {
 				pr_err("%s[%p]: pause FAILED rc=%d\n",
 					__func__, audio, rc);
+				mutex_unlock(&audio->lock);
+				break;
+			}
 			audio->drv_status |= ADRV_STATUS_PAUSE;
 		} else if (arg == 0) {
 			if (audio->drv_status & ADRV_STATUS_PAUSE) {

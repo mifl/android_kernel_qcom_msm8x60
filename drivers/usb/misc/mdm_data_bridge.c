@@ -21,7 +21,7 @@
 #include <linux/ratelimit.h>
 #include <mach/usb_bridge.h>
 
-#define MAX_RX_URBS			50
+#define MAX_RX_URBS			100
 #define RMNET_RX_BUFSIZE		2048
 
 #define STOP_SUBMIT_URB_LIMIT		500
@@ -370,7 +370,7 @@ static void defer_kevent(struct work_struct *work)
 
 		status = usb_autopm_get_interface(dev->intf);
 		if (status < 0) {
-			dev_err(&dev->intf->dev,
+			dev_dbg(&dev->intf->dev,
 				"can't acquire interface, status %d\n", status);
 			return;
 		}
@@ -389,7 +389,7 @@ static void defer_kevent(struct work_struct *work)
 
 		status = usb_autopm_get_interface(dev->intf);
 		if (status < 0) {
-			dev_err(&dev->intf->dev,
+			dev_dbg(&dev->intf->dev,
 				"can't acquire interface, status %d\n", status);
 			return;
 		}
@@ -478,7 +478,7 @@ int data_bridge_write(unsigned int id, struct sk_buff *skb)
 
 	result = usb_autopm_get_interface(dev->intf);
 	if (result < 0) {
-		dev_err(&dev->intf->dev, "%s: resume failure\n", __func__);
+		dev_dbg(&dev->intf->dev, "%s: resume failure\n", __func__);
 		goto pm_error;
 	}
 
@@ -990,10 +990,10 @@ static void bridge_disconnect(struct usb_interface *intf)
 	}
 
 	ch_id--;
-	ctrl_bridge_disconnect(ch_id);
+	ctrl_bridge_disconnect(dev->id);
 	platform_device_unregister(dev->pdev);
 	usb_set_intfdata(intf, NULL);
-	__dev[ch_id] = NULL;
+	__dev[dev->id] = NULL;
 
 	cancel_work_sync(&dev->process_rx_w);
 	cancel_work_sync(&dev->kevent);

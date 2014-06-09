@@ -313,6 +313,17 @@ struct msm_snd_endpoints {
 	unsigned num;
 };
 
+struct cad_endpoint {
+	int id;
+	const char *name;
+	uint32_t capability;
+};
+
+struct msm_cad_endpoints {
+	struct cad_endpoint *endpoints;
+	unsigned num;
+};
+
 #define MSM_MAX_DEC_CNT 14
 /* 7k target ADSP information */
 /* Bit 23:0, for codec identification like mp3, wav etc *
@@ -521,6 +532,7 @@ struct msm_i2c_platform_data {
 	int aux_dat;
 	int src_clk_rate;
 	int use_gsbi_shared_mode;
+	int keep_ahb_clk_on;
 	void (*msm_i2c_config_gpio)(int iface, int config_type);
 };
 

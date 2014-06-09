@@ -799,6 +799,25 @@ static int32_t q6asm_mmapcallback(struct apr_client_data *data, void *priv)
 	return 0;
 }
 
+static int32_t is_no_wait_cmd_rsp(uint32_t opcode, uint32_t *cmd_type)
+{
+	if (opcode == APR_BASIC_RSP_RESULT) {
+		if (cmd_type != NULL) {
+			switch (cmd_type[0]) {
+			case ASM_SESSION_CMD_RUN:
+			case ASM_SESSION_CMD_PAUSE:
+			case ASM_DATA_CMD_EOS:
+				return 1;
+			default:
+				break;
+			}
+		} else
+			pr_err("%s: null pointer!", __func__);
+	} else if (opcode == ASM_DATA_CMDRSP_EOS)
+		return 1;
+
+	return 0;
+}
 
 static int32_t q6asm_callback(struct apr_client_data *data, void *priv)
 {
@@ -819,14 +838,16 @@ static int32_t q6asm_callback(struct apr_client_data *data, void *priv)
 			ac->session);
 		return -EINVAL;
 	}
-	if (atomic_read(&ac->nowait_cmd_cnt) > 0) {
+
+	payload = data->payload;
+	if ((atomic_read(&ac->nowait_cmd_cnt) > 0) &&
+		is_no_wait_cmd_rsp(data->opcode, payload)) {
 		pr_debug("%s: nowait_cmd_cnt %d\n",
 				__func__,
 				atomic_read(&ac->nowait_cmd_cnt));
 		atomic_dec(&ac->nowait_cmd_cnt);
 		wakeup_flag = 0;
 	}
-	payload = data->payload;
 
 	if (data->opcode == RESET_EVENTS) {
 		pr_debug("q6asm_callback: Reset event is received: %d %d apr[%p]\n",
@@ -874,7 +895,11 @@ static int32_t q6asm_callback(struct apr_client_data *data, void *priv)
 		case ASM_STREAM_CMD_SET_ENCDEC_PARAM:
 		case ASM_STREAM_CMD_OPEN_WRITE_COMPRESSED:
 		case ASM_STREAM_CMD_OPEN_READ_COMPRESSED:
-			if (atomic_read(&ac->cmd_state) && wakeup_flag) {
+			if (payload[0] == ASM_STREAM_CMD_CLOSE) {
+				atomic_set(&ac->cmd_close_state, 0);
+				wake_up(&ac->cmd_wait);
+			} else if (atomic_read(&ac->cmd_state) &&
+					wakeup_flag) {
 				atomic_set(&ac->cmd_state, 0);
 				if (payload[1] == ADSP_EUNSUPPORTED) {
 					pr_debug("paload[1]:%d unsupported",
@@ -3602,7 +3627,8 @@ int q6asm_cmd(struct audio_client *ac, int cmd)
 	case CMD_CLOSE:
 		pr_debug("%s:CMD_CLOSE\n", __func__);
 		hdr.opcode = ASM_STREAM_CMD_CLOSE;
-		state = &ac->cmd_state;
+		atomic_set(&ac->cmd_close_state, 1);
+		state = &ac->cmd_close_state;
 		break;
 	default:
 		pr_err("Invalid format[%d]\n", cmd);

@@ -361,7 +361,6 @@ irqreturn_t mdp4_isr(int irq, void *ptr)
 	uint32 isr, mask, panel;
 	struct mdp_dma_data *dma;
 	struct mdp_hist_mgmt *mgmt = NULL;
-	char *base_addr;
 	int i, ret;
 
 	mdp_is_in_isr = TRUE;
@@ -389,12 +388,7 @@ irqreturn_t mdp4_isr(int irq, void *ptr)
 			mgmt = mdp_hist_mgmt_array[i];
 			if (!mgmt)
 				continue;
-			base_addr = MDP_BASE + mgmt->base;
-			MDP_OUTP(base_addr + 0x010, 1);
-			outpdw(base_addr + 0x01c, INTR_HIST_DONE |
-						INTR_HIST_RESET_SEQ_DONE);
 			mgmt->mdp_is_hist_valid = FALSE;
-			__mdp_histogram_reset(mgmt);
 		}
 	}
 
@@ -500,6 +494,7 @@ irqreturn_t mdp4_isr(int irq, void *ptr)
 #if defined(CONFIG_FB_MSM_WRITEBACK_MSM_PANEL)
 	if (isr & INTR_OVERLAY2_DONE) {
 		mdp4_stat.intr_overlay2++;
+		mdp_pipe_ctrl(MDP_OVERLAY2_BLOCK, MDP_BLOCK_POWER_OFF, FALSE);
 		/* disable DTV interrupt */
 		dma = &dma_wb_data;
 		spin_lock(&mdp_spin_lock);

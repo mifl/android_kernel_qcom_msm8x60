@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2013, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -1792,11 +1792,11 @@ static void tabla_codec_enable_bandgap(struct snd_soc_codec *codec,
 			0x00);
 	} else if ((tabla->bandgap_type == TABLA_BANDGAP_MBHC_MODE) &&
 		(choice == TABLA_BANDGAP_AUDIO_MODE)) {
-		snd_soc_write(codec, TABLA_A_BIAS_CENTRAL_BG_CTL, 0x00);
+		snd_soc_write(codec, TABLA_A_BIAS_CENTRAL_BG_CTL, 0x50);
 		usleep_range(100, 100);
 		tabla_codec_enable_audio_mode_bandgap(codec);
 	} else if (choice == TABLA_BANDGAP_OFF) {
-		snd_soc_write(codec, TABLA_A_BIAS_CENTRAL_BG_CTL, 0x00);
+		snd_soc_write(codec, TABLA_A_BIAS_CENTRAL_BG_CTL, 0x50);
 	} else {
 		pr_err("%s: Error, Invalid bandgap settings\n", __func__);
 	}
@@ -2283,6 +2283,9 @@ static void tabla_codec_pause_hs_polling(struct snd_soc_codec *codec)
 		return;
 	}
 
+	snd_soc_update_bits(codec, tabla->mbhc_bias_regs.ctl_reg, 0x01, 0x01);
+	msleep(250);
+	snd_soc_update_bits(codec, tabla->mbhc_bias_regs.ctl_reg, 0x01, 0x00);
 	snd_soc_update_bits(codec, TABLA_A_CDC_MBHC_CLK_CTL, 0x8, 0x8);
 	pr_debug("%s: leave\n", __func__);
 }
@@ -3063,6 +3066,26 @@ static int tabla_lineout_dac_event(struct snd_soc_dapm_widget *w,
 	return 0;
 }
 
+static int tabla_ear_pa_event(struct snd_soc_dapm_widget *w,
+	struct snd_kcontrol *kcontrol, int event)
+{
+	struct snd_soc_codec *codec = w->codec;
+
+	pr_debug("%s %d\n", __func__, event);
+
+	switch (event) {
+	case SND_SOC_DAPM_PRE_PMU:
+		snd_soc_update_bits(codec, TABLA_A_RX_EAR_EN, 0x50, 0x50);
+		break;
+
+	case SND_SOC_DAPM_PRE_PMD:
+		snd_soc_update_bits(codec, TABLA_A_RX_EAR_EN, 0x10, 0x00);
+		snd_soc_update_bits(codec, TABLA_A_RX_EAR_EN, 0x40, 0x00);
+		break;
+	}
+	return 0;
+}
+
 static const struct snd_soc_dapm_widget tabla_1_x_dapm_widgets[] = {
 	SND_SOC_DAPM_MICBIAS_E("MIC BIAS4 External", TABLA_1_A_MICB_4_CTL, 7,
 				0, tabla_codec_enable_micbias,
@@ -3759,6 +3782,35 @@ static int tabla_startup(struct snd_pcm_substream *substream,
 	return 0;
 }
 
+static void tabla_shutdown(struct snd_pcm_substream *substream,
+		struct snd_soc_dai *dai)
+{
+	struct wcd9xxx *tabla_core = dev_get_drvdata(dai->codec->dev->parent);
+	struct tabla_priv *tabla = snd_soc_codec_get_drvdata(dai->codec);
+	u32 active = 0;
+
+	pr_debug("%s(): substream = %s  stream = %d\n" , __func__,
+		 substream->name, substream->stream);
+	if (tabla->intf_type != WCD9XXX_INTERFACE_TYPE_SLIMBUS)
+		return;
+
+	if (dai->id <= NUM_CODEC_DAIS) {
+		if (tabla->dai[dai->id-1].ch_mask) {
+			active = 1;
+			pr_debug("%s(): Codec DAI: chmask[%d] = 0x%x\n",
+			__func__, dai->id-1, tabla->dai[dai->id-1].ch_mask);
+		}
+	}
+
+	if ((tabla_core != NULL) &&
+	    (tabla_core->dev != NULL) &&
+	    (tabla_core->dev->parent != NULL) &&
+	    (active == 0)) {
+		pm_runtime_mark_last_busy(tabla_core->dev->parent);
+		pm_runtime_put(tabla_core->dev->parent);
+	}
+}
+
 int tabla_mclk_enable(struct snd_soc_codec *codec, int mclk_enable, bool dapm)
 {
 	struct tabla_priv *tabla = snd_soc_codec_get_drvdata(codec);
@@ -4319,6 +4371,7 @@ static int tabla_hw_params(struct snd_pcm_substream *substream,
 
 static struct snd_soc_dai_ops tabla_dai_ops = {
 	.startup = tabla_startup,
+	.shutdown = tabla_shutdown,
 	.hw_params = tabla_hw_params,
 	.set_sysclk = tabla_set_dai_sysclk,
 	.set_fmt = tabla_set_dai_fmt,
@@ -4472,8 +4525,8 @@ static int tabla_codec_enable_chmask(struct tabla_priv *tabla_p,
 			pr_err("%s: Slim close tx/rx wait timeout\n",
 				__func__);
 			ret = -EINVAL;
-		}
-		ret = 0;
+		} else
+			ret = 0;
 		break;
 	}
 	return ret;
@@ -4486,7 +4539,7 @@ static int tabla_codec_enable_slimrx(struct snd_soc_dapm_widget *w,
 	struct snd_soc_codec *codec = w->codec;
 	struct tabla_priv *tabla_p = snd_soc_codec_get_drvdata(codec);
 	u32  j = 0;
-	u32  ret = 0;
+	int  ret = 0;
 	codec->control_data = dev_get_drvdata(codec->dev->parent);
 	tabla = codec->control_data;
 
@@ -4543,13 +4596,22 @@ static int tabla_codec_enable_slimrx(struct snd_soc_dapm_widget *w,
 			ret = wcd9xxx_close_slim_sch_rx(tabla,
 						tabla_p->dai[j].ch_num,
 						tabla_p->dai[j].ch_tot);
+			ret = tabla_codec_enable_chmask(tabla_p,
+							SND_SOC_DAPM_POST_PMD,
+							j);
+			if (ret < 0) {
+				ret = wcd9xxx_disconnect_port(tabla,
+							tabla_p->dai[j].ch_num,
+							tabla_p->dai[j].ch_tot,
+							1);
+				pr_info("%s: Disconnect RX port ret = %d\n",
+					__func__, ret);
+			}
 			tabla_p->dai[j].rate = 0;
 			memset(tabla_p->dai[j].ch_num, 0, (sizeof(u32)*
 					tabla_p->dai[j].ch_tot));
 			tabla_p->dai[j].ch_tot = 0;
-			ret = tabla_codec_enable_chmask(tabla_p,
-							SND_SOC_DAPM_POST_PMD,
-							j);
+
 			if ((tabla != NULL) &&
 			    (tabla->dev != NULL) &&
 			    (tabla->dev->parent != NULL)) {
@@ -4569,7 +4631,7 @@ static int tabla_codec_enable_slimtx(struct snd_soc_dapm_widget *w,
 	struct tabla_priv *tabla_p = snd_soc_codec_get_drvdata(codec);
 	/* index to the DAI ID, for now hardcoding */
 	u32  j = 0;
-	u32  ret = 0;
+	int  ret = 0;
 
 	codec->control_data = dev_get_drvdata(codec->dev->parent);
 	tabla = codec->control_data;
@@ -4626,13 +4688,22 @@ static int tabla_codec_enable_slimtx(struct snd_soc_dapm_widget *w,
 			ret = wcd9xxx_close_slim_sch_tx(tabla,
 						tabla_p->dai[j].ch_num,
 						tabla_p->dai[j].ch_tot);
+			ret = tabla_codec_enable_chmask(tabla_p,
+						SND_SOC_DAPM_POST_PMD,
+						j);
+			if (ret < 0) {
+				ret = wcd9xxx_disconnect_port(tabla,
+						tabla_p->dai[j].ch_num,
+						tabla_p->dai[j].ch_tot, 0);
+				pr_info("%s: Disconnect TX port, ret = %d\n",
+					__func__, ret);
+			}
+
 			tabla_p->dai[j].rate = 0;
 			memset(tabla_p->dai[j].ch_num, 0, (sizeof(u32)*
 					tabla_p->dai[j].ch_tot));
 			tabla_p->dai[j].ch_tot = 0;
-			ret = tabla_codec_enable_chmask(tabla_p,
-							SND_SOC_DAPM_POST_PMD,
-							j);
+
 			if ((tabla != NULL) &&
 			    (tabla->dev != NULL) &&
 			    (tabla->dev->parent != NULL)) {
@@ -4651,9 +4722,11 @@ static const struct snd_soc_dapm_widget tabla_dapm_widgets[] = {
 	/*RX stuff */
 	SND_SOC_DAPM_OUTPUT("EAR"),
 
-	SND_SOC_DAPM_PGA("EAR PA", TABLA_A_RX_EAR_EN, 4, 0, NULL, 0),
+	SND_SOC_DAPM_PGA_E("EAR PA", SND_SOC_NOPM, 0, 0, NULL,
+			0, tabla_ear_pa_event, SND_SOC_DAPM_PRE_PMU |
+			SND_SOC_DAPM_PRE_PMD),
 
-	SND_SOC_DAPM_MIXER("DAC1", TABLA_A_RX_EAR_EN, 6, 0, dac1_switch,
+	SND_SOC_DAPM_MIXER("DAC1", SND_SOC_NOPM, 0, 0, dac1_switch,
 		ARRAY_SIZE(dac1_switch)),
 
 	/* Headphone */
@@ -5322,6 +5395,7 @@ static int tabla_codec_enable_hs_detect(struct snd_soc_codec *codec,
 	snd_soc_update_bits(codec, tabla->mbhc_bias_regs.mbhc_reg, 0x90, 0x00);
 
 	if (insertion) {
+		pr_debug("%s: setup for insertion\n", __func__);
 		tabla_codec_switch_micbias(codec, 0);
 
 		/* DAPM can manipulate PA/DAC bits concurrently */
@@ -6339,6 +6413,13 @@ void tabla_find_plug_and_report(struct snd_soc_codec *codec,
 		 * only report the mic line
 		 */
 		tabla_codec_report_plug(codec, 1, SND_JACK_HEADSET);
+		if (!tabla->mbhc_micbias_switched &&
+			tabla_is_hph_pa_on(codec)) {
+			/*If the headphone path is on, switch the micbias
+			to VDDIO to avoid noise due to button polling */
+			tabla_codec_switch_micbias(codec, 1);
+			pr_debug("%s: HPH path is still up\n", __func__);
+		}
 		msleep(100);
 		tabla_codec_start_hs_polling(codec);
 	} else if (plug_type == PLUG_TYPE_HIGH_HPH) {
@@ -6709,13 +6790,11 @@ static void tabla_codec_detect_plug_type(struct snd_soc_codec *codec)
 		pr_debug("%s: Headphone Detected\n", __func__);
 		tabla_codec_report_plug(codec, 1, SND_JACK_HEADPHONE);
 		tabla_codec_cleanup_hs_polling(codec);
-		tabla_codec_enable_hs_detect(codec, 0, 0, false);
 		tabla_schedule_hs_detect_plug(tabla,
 					&tabla->hs_correct_plug_work_nogpio);
 	} else if (plug_type == PLUG_TYPE_HEADSET) {
 		pr_debug("%s: Headset detected\n", __func__);
 		tabla_codec_report_plug(codec, 1, SND_JACK_HEADSET);
-
 		/* avoid false button press detect */
 		msleep(50);
 		tabla_codec_start_hs_polling(codec);
@@ -7125,6 +7204,7 @@ static void tabla_hs_gpio_handler(struct snd_soc_codec *codec)
 					    0x08, 0x00);
 			/* Turn off override */
 			tabla_turn_onoff_override(codec, false);
+			tabla_codec_switch_micbias(codec, 0);
 		}
 	}
 
@@ -7212,6 +7292,8 @@ static void tabla_hs_correct_plug_nogpio(struct work_struct *work)
 	 */
 	tabla->mbhc_cfg.mclk_cb_fn(codec, 0, false);
 	if (!is_headset) {
+		pr_debug("%s: Inserted headphone is not a headset\n",
+			__func__);
 		tabla_turn_onoff_override(codec, false);
 		tabla_codec_cleanup_hs_polling(codec);
 		tabla_codec_enable_hs_detect(codec, 0, 0, false);

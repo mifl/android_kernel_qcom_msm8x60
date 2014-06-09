@@ -471,7 +471,7 @@ struct ddl_client_context *ddl_get_current_ddl_client_for_channel_id(
 		ddl = ddl_context->current_ddl[1];
 	else {
 		DDL_MSG_LOW("STATE-CRITICAL-FRMRUN");
-		DDL_MSG_ERROR("Unexpected channel ID = %d", channel_id);
+		DDL_MSG_LOW("Unexpected channel ID = %d", channel_id);
 		ddl = NULL;
 	}
 	return ddl;
@@ -922,7 +922,9 @@ u32 ddl_allocate_enc_hw_buffers(struct ddl_client_context *ddl)
 				goto fail_enc_free_exit;
 		}
 		if (buf_size.sz_pred > 0) {
-			enc_bufs->pred.mem_type = DDL_FW_MEM;
+			enc_bufs->pred.mem_type =
+				res_trk_check_for_sec_session() ?
+				DDL_MM_MEM : DDL_FW_MEM;
 			ptr = ddl_pmem_alloc(&enc_bufs->pred,
 				buf_size.sz_pred, DDL_KILO_BYTE(2));
 			if (!ptr)

@@ -28,6 +28,14 @@
 
 #define GSL_RB_NOP_SIZEDWORDS				2
 
+/*
+ * CP DEBUG settings for all cores:
+ * DYNAMIC_CLK_DISABLE [27] - turn off the dynamic clock control
+ * PROG_END_PTR_ENABLE [25] - Allow 128 bit writes to the VBIF
+ */
+
+#define CP_DEBUG_DEFAULT ((1 << 27) | (1 << 25))
+
 void adreno_ringbuffer_submit(struct adreno_ringbuffer *rb)
 {
 	BUG_ON(rb->wptr == 0);
@@ -186,10 +194,10 @@ static int _load_firmware(struct kgsl_device *device, const char *fwfile,
 	return (*data != NULL) ? 0 : -ENOMEM;
 }
 
-static int adreno_ringbuffer_load_pm4_ucode(struct kgsl_device *device)
+int adreno_ringbuffer_read_pm4_ucode(struct kgsl_device *device)
 {
 	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
-	int i, ret = 0;
+	int ret = 0;
 
 	if (adreno_dev->pm4_fw == NULL) {
 		int len;
@@ -211,24 +219,41 @@ static int adreno_ringbuffer_load_pm4_ucode(struct kgsl_device *device)
 
 		adreno_dev->pm4_fw_size = len / sizeof(uint32_t);
 		adreno_dev->pm4_fw = ptr;
+		adreno_dev->pm4_fw_version = adreno_dev->pm4_fw[1];
 	}
 
-	KGSL_DRV_INFO(device, "loading pm4 ucode version: %d\n",
-		adreno_dev->pm4_fw[0]);
-
-	adreno_regwrite(device, REG_CP_DEBUG, 0x02000000);
-	adreno_regwrite(device, REG_CP_ME_RAM_WADDR, 0);
-	for (i = 1; i < adreno_dev->pm4_fw_size; i++)
-		adreno_regwrite(device, REG_CP_ME_RAM_DATA,
-				     adreno_dev->pm4_fw[i]);
 err:
 	return ret;
 }
 
-static int adreno_ringbuffer_load_pfp_ucode(struct kgsl_device *device)
+
+int adreno_ringbuffer_load_pm4_ucode(struct kgsl_device *device)
 {
 	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
-	int i, ret = 0;
+	int i;
+
+	if (adreno_dev->pm4_fw == NULL) {
+		int ret = adreno_ringbuffer_read_pm4_ucode(device);
+		if (ret)
+			return ret;
+	}
+
+	KGSL_DRV_INFO(device, "loading pm4 ucode version: %d\n",
+		adreno_dev->pm4_fw_version);
+
+	adreno_regwrite(device, REG_CP_DEBUG, CP_DEBUG_DEFAULT);
+	adreno_regwrite(device, REG_CP_ME_RAM_WADDR, 0);
+	for (i = 1; i < adreno_dev->pm4_fw_size; i++)
+		adreno_regwrite(device, REG_CP_ME_RAM_DATA,
+			adreno_dev->pm4_fw[i]);
+
+	return 0;
+}
+
+int adreno_ringbuffer_read_pfp_ucode(struct kgsl_device *device)
+{
+	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
+	int ret = 0;
 
 	if (adreno_dev->pfp_fw == NULL) {
 		int len;
@@ -249,18 +274,34 @@ static int adreno_ringbuffer_load_pfp_ucode(struct kgsl_device *device)
 
 		adreno_dev->pfp_fw_size = len / sizeof(uint32_t);
 		adreno_dev->pfp_fw = ptr;
+		adreno_dev->pfp_fw_version = adreno_dev->pfp_fw[5];
+	}
+
+err:
+	return ret;
+}
+
+int adreno_ringbuffer_load_pfp_ucode(struct kgsl_device *device)
+{
+	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
+	int i;
+
+	if (adreno_dev->pfp_fw == NULL) {
+		int ret = adreno_ringbuffer_read_pfp_ucode(device);
+		if (ret)
+			return ret;
 	}
 
 	KGSL_DRV_INFO(device, "loading pfp ucode version: %d\n",
-		adreno_dev->pfp_fw[0]);
+			adreno_dev->pfp_fw_version);
 
 	adreno_regwrite(device, adreno_dev->gpudev->reg_cp_pfp_ucode_addr, 0);
 	for (i = 1; i < adreno_dev->pfp_fw_size; i++)
 		adreno_regwrite(device,
-			adreno_dev->gpudev->reg_cp_pfp_ucode_data,
-			adreno_dev->pfp_fw[i]);
-err:
-	return ret;
+		adreno_dev->gpudev->reg_cp_pfp_ucode_data,
+		adreno_dev->pfp_fw[i]);
+
+	return 0;
 }
 
 int adreno_ringbuffer_start(struct adreno_ringbuffer *rb, unsigned int init_ram)
@@ -367,7 +408,6 @@ int adreno_ringbuffer_start(struct adreno_ringbuffer *rb, unsigned int init_ram)
 			     GSL_RB_MEMPTRS_SCRATCH_MASK);
 
 	/* load the CP ucode */
-
 	status = adreno_ringbuffer_load_pm4_ucode(device);
 	if (status != 0)
 		return status;
@@ -401,8 +441,11 @@ int adreno_ringbuffer_start(struct adreno_ringbuffer *rb, unsigned int init_ram)
 
 void adreno_ringbuffer_stop(struct adreno_ringbuffer *rb)
 {
-	if (rb->flags & KGSL_FLAGS_STARTED)
+	if (rb->flags & KGSL_FLAGS_STARTED) {
+		/* ME_HALT */
+		adreno_regwrite(rb->device, REG_CP_ME_CNTL, 0x10000000);
 		rb->flags &= ~KGSL_FLAGS_STARTED;
+	}
 }
 
 int adreno_ringbuffer_init(struct kgsl_device *device)
@@ -495,6 +538,9 @@ adreno_ringbuffer_addcmds(struct adreno_ringbuffer *rb,
 	if (adreno_is_a3xx(adreno_dev))
 		total_sizedwords += 7;
 
+	if (adreno_is_a2xx(adreno_dev))
+		total_sizedwords += 2; /* CP_WAIT_FOR_IDLE */
+
 	total_sizedwords += 2; /* scratchpad ts for recovery */
 	if (context->flags & CTXT_FLAGS_PER_CONTEXT_TS) {
 		total_sizedwords += 3; /* sop timestamp */
@@ -551,6 +597,16 @@ adreno_ringbuffer_addcmds(struct adreno_ringbuffer *rb,
 			rb->timestamp[context_id]++;
 	}
 	timestamp = rb->timestamp[context_id];
+
+	/* HW Workaround for MMU Page fault
+	* due to memory getting free early before
+	* GPU completes it.
+	*/
+	if (adreno_is_a2xx(adreno_dev)) {
+		GSL_RB_WRITE(ringcmds, rcmd_gpu,
+			cp_type3_packet(CP_WAIT_FOR_IDLE, 1));
+		GSL_RB_WRITE(ringcmds, rcmd_gpu, 0x00);
+	}
 
 	/* scratchpad ts for recovery */
 	GSL_RB_WRITE(ringcmds, rcmd_gpu, cp_type0_packet(REG_CP_TIMESTAMP, 1));

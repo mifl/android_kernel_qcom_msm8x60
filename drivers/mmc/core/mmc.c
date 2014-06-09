@@ -463,7 +463,7 @@ static int mmc_read_ext_csd(struct mmc_card *card, u8 *ext_csd)
 	}
 
 	if (card->ext_csd.rev >= 5) {
-		/* check whether the eMMC card support BKOPS */
+		/* check whether the eMMC card supports BKOPS */
 		if (ext_csd[EXT_CSD_BKOPS_SUPPORT] & 0x1) {
 			card->ext_csd.bkops = 1;
 			card->ext_csd.bkops_en = ext_csd[EXT_CSD_BKOPS_EN];
@@ -474,11 +474,14 @@ static int mmc_read_ext_csd(struct mmc_card *card, u8 *ext_csd)
 				err = mmc_switch(card, EXT_CSD_CMD_SET_NORMAL,
 					EXT_CSD_BKOPS_EN, 1, 0);
 				if (err)
-					pr_warning("%s: Enabling BKOPS failed\n",
+					pr_warn("%s: Enabling BKOPS failed\n",
 						mmc_hostname(card->host));
 				else
 					card->ext_csd.bkops_en = 1;
 			}
+			if (!card->ext_csd.bkops_en)
+				pr_info("%s: BKOPS_EN bit is not set\n",
+					mmc_hostname(card->host));
 		}
 
 		/* check whether the eMMC card supports HPI */
@@ -534,6 +537,7 @@ static int mmc_read_ext_csd(struct mmc_card *card, u8 *ext_csd)
 		} else {
 			card->ext_csd.data_tag_unit_size = 0;
 		}
+
 		card->ext_csd.max_packed_writes =
 			ext_csd[EXT_CSD_MAX_PACKED_WRITES];
 		card->ext_csd.max_packed_reads =
@@ -1275,9 +1279,10 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 		}
 	}
 
-	if ((host->caps2 & MMC_CAP2_PACKED_CMD) &&
-			(card->ext_csd.max_packed_writes > 0) &&
-			(card->ext_csd.max_packed_reads > 0)) {
+	if ((host->caps2 & MMC_CAP2_PACKED_WR &&
+			card->ext_csd.max_packed_writes > 0) ||
+	    (host->caps2 & MMC_CAP2_PACKED_RD &&
+			card->ext_csd.max_packed_reads > 0)) {
 		err = mmc_switch(card, EXT_CSD_CMD_SET_NORMAL,
 				EXT_CSD_EXP_EVENTS_CTRL,
 				EXT_CSD_PACKED_EVENT_EN,
@@ -1309,6 +1314,26 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 				GFP_KERNEL);
 			if (!card->wr_pack_stats.packing_events)
 				goto free_card;
+		}
+
+		if (card->ext_csd.bkops_en) {
+			INIT_DELAYED_WORK(&card->bkops_info.dw,
+					  mmc_start_idle_time_bkops);
+			INIT_WORK(&card->bkops_info.poll_for_completion,
+				  mmc_bkops_completion_polling);
+
+			/*
+			 * Calculate the time to start the BKOPs checking.
+			 * The host controller can set this time in order to
+			 * prevent a race condition before starting BKOPs
+			 * and going into suspend.
+			 * If the host controller didn't set this time,
+			 * a default value is used.
+			 */
+			card->bkops_info.delay_ms = MMC_IDLE_BKOPS_TIME_MS;
+			if (card->bkops_info.host_delay_ms)
+				card->bkops_info.delay_ms =
+					card->bkops_info.host_delay_ms;
 		}
 	}
 
@@ -1424,6 +1449,11 @@ static int mmc_suspend(struct mmc_host *host)
 	BUG_ON(!host->card);
 
 	mmc_claim_host(host);
+
+	err = mmc_cache_ctrl(host, 0);
+	if (err)
+		goto out;
+
 	if (mmc_can_poweroff_notify(host->card) &&
 		(host->caps2 & MMC_CAP2_POWER_OFF_VCCQ_DURING_SUSPEND)) {
 		err = mmc_poweroff_notify(host, MMC_PW_OFF_NOTIFY_SHORT);
@@ -1444,6 +1474,8 @@ static int mmc_suspend(struct mmc_host *host)
 	if (!err)
 		host->card->state &=
 			~(MMC_STATE_HIGHSPEED | MMC_STATE_HIGHSPEED_200);
+
+out:
 	mmc_release_host(host);
 
 	return err;
