@@ -4516,6 +4516,11 @@ error:
 	return ret;
 }
 
+bool mhl_is_enabled(void)
+{
+	return hdmi_msm_state->is_mhl_enabled;
+}
+
 void hdmi_msm_config_hdcp_feature(void)
 {
 	if (hdcp_feature_on && hdmi_msm_has_hdcp()) {
@@ -4700,6 +4705,12 @@ static int __devinit hdmi_msm_probe(struct platform_device *pdev)
 		goto error;
 	}
 
+	/* Set the default video resolution for MHL-enabled display */
+	if (hdmi_msm_state->is_mhl_enabled) {
+		DEV_DBG("MHL Enabled. Restricting default video resolution\n");
+		external_common_state->video_resolution =
+			HDMI_VFRMT_1920x1080p30_16_9;
+	}
 	return 0;
 
 error:

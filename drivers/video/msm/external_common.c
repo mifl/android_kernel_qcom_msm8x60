@@ -1482,7 +1482,7 @@ static void add_supported_video_format(
 		video_format, video_format_2string(video_format),
 		supported ? "Supported" : "Not-Supported");
 
-	if (mhl_is_connected()) {
+	if (mhl_is_enabled()) {
 		const struct hdmi_disp_mode_timing_type *mhl_timing =
 			hdmi_mhl_get_supported_mode(video_format);
 		mhl_supported = mhl_timing != NULL;
