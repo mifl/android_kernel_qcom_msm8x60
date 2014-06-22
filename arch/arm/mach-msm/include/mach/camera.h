@@ -11,6 +11,10 @@
  *
  */
 
+#ifdef CONFIG_PANTECH_CAMERA
+#include <mach/camera_pantech.h>
+#else /* CONFIG_PANTECH_CAMERA */
+
 #ifndef __ASM__ARCH_CAMERA_H
 #define __ASM__ARCH_CAMERA_H
 
@@ -742,3 +746,5 @@ int msm_camera_config_gpio_table
 int msm_camera_request_gpio_table
 	(struct msm_camera_sensor_info *sinfo, int gpio_en);
 #endif
+
+#endif /* CONFIG_PANTECH_CAMERA */

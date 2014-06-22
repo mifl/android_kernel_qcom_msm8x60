@@ -10,6 +10,11 @@
  * GNU General Public License for more details.
  *
  */
+
+#ifdef CONFIG_PANTECH_CAMERA
+#include <linux/media/pantech_isp.h>
+#else /* CONFIG_PANTECH_CAMERA */
+
 #ifndef __MSM_ISP_H__
 #define __MSM_ISP_H__
 
@@ -366,3 +371,5 @@ struct msm_frame_info {
 };
 
 #endif /*__MSM_ISP_H__*/
+
+#endif /* CONFIG_PANTECH_CAMERA */
