@@ -65,7 +65,7 @@ static int lm3559_onoff_state = LM3559_POWER_OFF;
 static struct lm3559_flash_platform_data *lm3559_led_flash_pdata = NULL;
 static struct i2c_client *lm3559_i2c_client = NULL;
 
-static int lm3559_write_reg(struct i2c_client *client, unsigned char addr, unsigned char data)
+int lm3559_write_reg(struct i2c_client *client, unsigned char addr, unsigned char data)
 {
 	int err = 0;
 
@@ -91,7 +91,7 @@ static int lm3559_write_reg(struct i2c_client *client, unsigned char addr, unsig
 
 }
 
-static int lm3559_read_reg(struct i2c_client *client, unsigned char addr, unsigned char *data)
+int lm3559_read_reg(struct i2c_client *client, unsigned char addr, unsigned char *data)
 {
 	int err = 0;
 	unsigned char buf[1] ={0};
@@ -117,12 +117,10 @@ static int lm3559_read_reg(struct i2c_client *client, unsigned char addr, unsign
 
 }
 
-#if 0
-static void lm3559_led_shutdown(void)
+void lm3559_led_shutdown(void)
 {
 	lm3559_write_reg(lm3559_i2c_client, LM3559_REG_ENABLE, 0x18);
 }
-#endif
 
 /*	Torch Current
 	 000 : 28.125 mA		100 : 140.625 mA
@@ -130,9 +128,9 @@ static void lm3559_led_shutdown(void)
 	 010 : 84.375 mA 		110 : 196.875 mA
 	 011 : 112.5mA  		111 : 225 mA
 */
-static void lm3559_enable_torch_mode(enum led_status state)
+void lm3559_enable_torch_mode(enum led_status state)
 {
-	pr_info("%s: state = %d\n", __func__, state);
+	pr_err("%s: state = %d\n", __func__, state);
 
 	if (state == LM3559_LED_LOW) {
 		/* 011 011 : 112.5 mA */
@@ -155,18 +153,18 @@ static void lm3559_enable_torch_mode(enum led_status state)
 	 0110 : 393.75 mA		1110 : 843.75 mA
 	 0111 : 450 mA			1111 : 900 mA
 */
-static void lm3559_enable_flash_mode(enum led_status state)
+void lm3559_enable_flash_mode(enum led_status state)
 {
 	unsigned char data = 0;
 
-	pr_info("%s: state = %d\n", __func__, state);
+	pr_err("%s: state = %d\n", __func__, state);
 
 	lm3559_read_reg(lm3559_i2c_client, LM3559_REG_FLASH_DURATION, &data);
 
-	pr_debug("%s: Before - LM3559_REG_FLASH_DURATION[0x%x]\n",__func__,data);
+	pr_err("%s: Before - LM3559_REG_FLASH_DURATION[0x%x]\n",__func__,data);
 	data = ((data & 0x1F) | 0x1F); /* 1.4A Peak Current & 1024ms Duration*/
 
-	pr_debug("%s: After - LM3559_REG_FLASH_DURATION[0x%x]\n",__func__,data);
+	pr_err("%s: After - LM3559_REG_FLASH_DURATION[0x%x]\n",__func__,data);
 	lm3559_write_reg(lm3559_i2c_client, LM3559_REG_FLASH_DURATION, data);
 
 	if (state == LM3559_LED_LOW) {
@@ -182,41 +180,34 @@ static void lm3559_enable_flash_mode(enum led_status state)
 	lm3559_write_reg(lm3559_i2c_client, LM3559_REG_ENABLE, 0x1B);
 }
 
-static int lm3559_config_gpio_on(void)
+void lm3559_config_gpio_on(void)
 {
-	int rc = 0;
-	pr_debug("%s\n", __func__);
+	pr_err("%s: Start\n", __func__);
 
-	rc = gpio_request(lm3559_led_flash_pdata->gpio_en, "cam_flash_en");
-	if (rc < 0) {
-		pr_warn("%s: gpio_request failed: %d\n", __func__, rc);
-		return rc;
-	}
-
+	gpio_request(lm3559_led_flash_pdata->gpio_en, "cam_flash_en");
 	gpio_tlmm_config(GPIO_CFG(lm3559_led_flash_pdata->gpio_en, 0, GPIO_CFG_OUTPUT,
 		GPIO_CFG_PULL_UP, GPIO_CFG_2MA), GPIO_CFG_ENABLE);
 	gpio_direction_output(lm3559_led_flash_pdata->gpio_en, 0);
-	return rc;
 }
 
-static void lm3559_config_gpio_off(void)
+void lm3559_config_gpio_off(void)
 {
-	pr_info("%s\n", __func__);
+	pr_err("%s: Start\n", __func__);
 
 	gpio_direction_input(lm3559_led_flash_pdata->gpio_en);
 	gpio_free(lm3559_led_flash_pdata->gpio_en);
 }
 
-static void lm3559_led_enable(void)
+void lm3559_led_enable(void)
 {
-	pr_info("%s\n", __func__);
+	pr_err("%s: Start\n", __func__);
 	gpio_set_value_cansleep(lm3559_led_flash_pdata->gpio_en, 1);
 	lm3559_onoff_state = LM3559_POWER_ON;
 }
 
-static void lm3559_led_disable(void)
+void lm3559_led_disable(void)
 {
-	pr_info("%s\n", __func__);
+	pr_err("%s: Start\n", __func__);
 	gpio_set_value_cansleep(lm3559_led_flash_pdata->gpio_en, 0);
 	lm3559_onoff_state = LM3559_POWER_OFF;
 }
@@ -225,7 +216,7 @@ int lm3559_flash_set_led_state(int led_state)
 {
 	int err = 0;
 
-	pr_info("%s: led_state = %d\n", __func__, led_state);
+	pr_err("%s: led_state = %d\n", __func__, led_state);
 
 	switch (led_state) {
 	case MSM_CAMERA_LED_OFF:
@@ -240,7 +231,7 @@ int lm3559_flash_set_led_state(int led_state)
 		lm3559_enable_flash_mode(LM3559_LED_HIGH);
 		break;
 	case MSM_CAMERA_LED_INIT:
-		err = lm3559_config_gpio_on();
+		lm3559_config_gpio_on();
 		break;
 	case MSM_CAMERA_LED_RELEASE:
 		lm3559_config_gpio_off();
@@ -258,7 +249,7 @@ EXPORT_SYMBOL(lm3559_flash_set_led_state);
 static void lm3559_flash_led_set(struct led_classdev *led_cdev,
 	enum led_brightness value)
 {
-	pr_info("%s: led_cdev->brightness[%d]\n", __func__, value);
+	pr_err("%s: led_cdev->brightness[%d]\n", __func__, value);
 
 	led_cdev->brightness = value;
 
@@ -282,7 +273,7 @@ static int lm3559_probe(struct i2c_client *client, const struct i2c_device_id *i
 
 	if (lm3559_led_flash_pdata == NULL) {
 	    pr_err("%s: platform_data is NULL\n", __func__);
-	    return -ENODEV;
+	    return -EINVAL;
 	}
 
 	err = led_classdev_register(&client->dev, &lm3559_flash_led);
@@ -291,7 +282,7 @@ static int lm3559_probe(struct i2c_client *client, const struct i2c_device_id *i
 		return err;
 	}
 
-	pr_debug("%s: done\n", __func__);
+	pr_err("%s: probe stop\n", __func__);
 
 	return err;
 }
@@ -322,7 +313,7 @@ static struct i2c_driver lm3559_driver = {
 };
 static int __init lm3559_init(void)
 {
-	pr_info("%s\n", __func__);
+	pr_err("%s: start\n", __func__);
 	return i2c_add_driver(&lm3559_driver);
 }
 
