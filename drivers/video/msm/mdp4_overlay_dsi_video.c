@@ -57,7 +57,6 @@ static struct vsycn_ctrl {
 	int blt_change;
 	int blt_free;
 	int blt_ctrl;
-	int sysfs_created;
 	struct mutex update_lock;
 	struct completion ov_comp;
 	struct completion dmap_comp;
@@ -409,7 +408,6 @@ ssize_t mdp4_dsi_video_show_event(struct device *dev,
 	ret = wait_for_completion_interruptible(&vctrl->vsync_comp);
 	if (ret)
 		return ret;
-
 	spin_lock_irqsave(&vctrl->spin_lock, flags);
 	vsync_tick = ktime_to_ns(vctrl->vsync_time);
 	spin_unlock_irqrestore(&vctrl->spin_lock, flags);

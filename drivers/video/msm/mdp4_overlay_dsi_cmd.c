@@ -59,7 +59,6 @@ static struct vsycn_ctrl {
 	int blt_change;
 	int blt_free;
 	int blt_end;
-	int sysfs_created;
 	struct mutex update_lock;
 	struct completion ov_comp;
 	struct completion dmap_comp;
@@ -999,6 +998,7 @@ int mdp4_dsi_cmd_on(struct platform_device *pdev)
 	mdp4_iommu_attach();
 
 	atomic_set(&vctrl->suspend, 0);
+
 	pr_debug("%s-:\n", __func__);
 
 	return ret;

@@ -75,7 +75,6 @@ static struct vsycn_ctrl {
 	int dmae_wait_cnt;
 	int wait_vsync_cnt;
 	int blt_change;
-	int sysfs_created;
 	struct mutex update_lock;
 	struct completion ov_comp;
 	struct completion dmae_comp;
